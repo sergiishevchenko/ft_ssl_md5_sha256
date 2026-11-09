@@ -2,7 +2,9 @@
 
 Документ проводит строку `abc` через весь код `ft_ssl` до готового хеша. Каждое число ниже посчитано тем же алгоритмом, что в `srcs/whirlpool/whirlpool.c`, и сверено с выводом программы и официальным тестовым вектором Whirlpool для `abc`. Таблицы `g_whirlpool_c0` и `g_whirlpool_rc` проверены пересчётом из S-box и матрицы MDS.
 
-Общая схема программы (разбор флагов, форматы вывода) описана в [how-it-works.md](how-it-works.md). MD5 и SHA-256 на том же примере — в [md5.md](md5.md) и [sha256.md](sha256.md).
+Общая схема программы (разбор флагов, форматы вывода) описана в [how-it-works.md](../how-it-works.md). MD5 и SHA-256 на том же примере — в [md5.md](md5.md) и [sha256.md](sha256.md).
+
+У каждого шага есть фрагмент исходника: путь к файлу, номера строк и сам код без изменений. Комментарии `//` в фрагментах добавлены только в документе, в исходниках их нет. В комментариях — значения переменных для примера `abc`.
 
 ## Пример
 
@@ -63,27 +65,149 @@ H_новое = W(ключ = H_старое, текст = блок) ^ H_стар�
 
 ## 1. Как программа доходит до Whirlpool
 
-`find_hash("whirlpool")` возвращает третью запись `g_hashes`:
+```text
+main                              srcs/main.c
+ └─ find_hash("whirlpool")        srcs/dispatcher.c
+ └─ execute_command               srcs/execute.c
+     └─ parse_flags
+     └─ process_string            srcs/output.c
+         └─ hash_data             srcs/io.c
+             ├─ whirlpool_init    srcs/whirlpool/whirlpool.c
+             ├─ whirlpool_update
+             └─ whirlpool_final
+                 └─ whirlpool_transform
+                     ├─ wp_load_block
+                     └─ wp_round  × 16 на раунд, таблицы из whirlpool_tables.c
+         └─ digest_to_hex         srcs/io.c
+         └─ print_hash_result     srcs/output.c
+```
+
+### 1.1. `main`
+
+`srcs/main.c`, строки 3–21:
 
 ```c
-{"WHIRLPOOL", "whirlpool", 64, sizeof(t_whirlpool_ctx),
-	whirlpool_init, whirlpool_update, whirlpool_final},
+int	main(int argc, char **argv)          // argc = 4, argv = {"./ft_ssl", "whirlpool", "-s", "abc"}
+{
+	t_hash_func	*h;
+	t_ssl		ssl;
+
+	if (argc < 2)                        // 4 < 2 ложно
+		return (interactive_mode());
+	h = find_hash(argv[1]);              // find_hash("whirlpool") → &g_hashes[2]
+	if (!h)
+	{
+		print_invalid_command(argv[1]);
+		return (1);
+	}
+	ssl.hash = h;
+	ssl.argc = argc;
+	ssl.argv = argv;
+	ssl.cmd_index = 2;
+	return (execute_command(&ssl));
+}
+```
+
+### 1.2. `find_hash`
+
+`srcs/dispatcher.c`, строки 6–14 и 31–43:
+
+```c
+static t_hash_func	g_hashes[] = {
+	{"MD5", "md5", 16, sizeof(t_md5_ctx),
+		md5_init, md5_update, md5_final},
+	{"SHA256", "sha256", 32, sizeof(t_sha256_ctx),
+		sha256_init, sha256_update, sha256_final},
+	{"WHIRLPOOL", "whirlpool", 64, sizeof(t_whirlpool_ctx),   // ← эта запись, индекс 2
+		whirlpool_init, whirlpool_update, whirlpool_final},
+	{NULL, NULL, 0, 0, NULL, NULL, NULL}
+};
+
+t_hash_func	*find_hash(const char *name)               // name = "whirlpool"
+{
+	int	i;
+
+	i = 0;
+	while (g_hashes[i].name_lower)
+	{
+		if (ft_strcmp(g_hashes[i].name_lower, name) == 0)   // i = 0: "md5", i = 1: "sha256" — мимо
+			return (&g_hashes[i]);                          // i = 2: совпало
+		i++;
+	}
+	return (NULL);
+}
 ```
 
 `64` — размер дайджеста в байтах. В `process_string` буферы `digest[64]` и `hex[129]` рассчитаны как раз на Whirlpool, самый длинный из трёх.
 
-Дальше тот же путь: `execute_command` → `parse_flags` → `process_string("abc")` → `hash_data` → `whirlpool_init`, `whirlpool_update`, `whirlpool_final` → `digest_to_hex(digest, 64, hex)` → `print_hash_result`.
+### 1.3. `parse_flags`, `execute_command`, `process_string`
+
+Код и ход выполнения те же, что в разделе 1.3 [md5.md](md5.md): `-s` кладёт `abc` в `strings[0]`, затем вызывается `process_string(ssl, "abc")`.
+
+`srcs/output.c`, строки 131–143:
+
+```c
+void	process_string(t_ssl *ssl, const char *str)      // str = "abc"
+{
+	uint8_t	digest[64];                                  // Whirlpool займёт все 64 байта
+	char	hex[129];                                    // 128 символов + '\0', тоже впритык
+
+	if (hash_data(ssl->hash, (const uint8_t *)str, ft_strlen(str), digest))  // len = 3
+	{
+		print_io_error(ssl, str);
+		return ;
+	}
+	digest_to_hex(digest, ssl->hash->digest_size, hex);  // digest_size = 64
+	print_hash_result(ssl, str, hex, 0);
+}
+```
+
+### 1.4. `hash_data`
+
+`srcs/io.c`, строки 79–93:
+
+```c
+int	hash_data(t_hash_func *h, const uint8_t *data,
+		size_t len, uint8_t *digest)                     // data = "abc", len = 3
+{
+	void	*ctx;
+
+	ctx = malloc(h->ctx_size);                           // 144 байта под t_whirlpool_ctx
+	if (!ctx)
+		return (1);
+	h->init(ctx);                                        // whirlpool_init(ctx)
+	if (len > 0 && data)
+		h->update(ctx, data, len);                       // whirlpool_update(ctx, "abc", 3)
+	h->final(digest, ctx);                               // whirlpool_final(digest, ctx)
+	free(ctx);
+	return (0);
+}
+```
 
 ## 2. Контекст и `whirlpool_init`
+
+`includes/whirlpool.h`, строки 7–13:
 
 ```c
 typedef struct s_whirlpool_ctx
 {
-	uint64_t	state[8];
-	uint64_t	count;
-	uint8_t		buffer[64];
-	uint32_t	buflen;
-}	t_whirlpool_ctx;
+	uint64_t	state[8];      // 8 строк матрицы 8×8, по 64 бита = 512 бит будущего хеша
+	uint64_t	count;         // длина сообщения в байтах, для abc станет 3
+	uint8_t		buffer[64];    // недособранный блок
+	uint32_t	buflen;        // занято байт в buffer, 0…64
+}	t_whirlpool_ctx;           // 64 + 8 + 64 + 4 = 140 байт, с выравниванием 144
+```
+
+`srcs/whirlpool/whirlpool.c`, строки 87–93:
+
+```c
+void	whirlpool_init(void *ctx)
+{
+	t_whirlpool_ctx	*c;
+
+	c = (t_whirlpool_ctx *)ctx;
+	ft_memset(c, 0, sizeof(t_whirlpool_ctx));   // state[0…7] = 0, count = 0, buffer = 0, buflen = 0
+}
 ```
 
 `whirlpool_init` делает один `ft_memset(c, 0, sizeof(t_whirlpool_ctx))`. Начальное состояние — 512 нулевых бит. Отдельные константы не нужны: вся «случайность» сидит в S-box.
@@ -92,24 +216,82 @@ typedef struct s_whirlpool_ctx
 
 Тот же цикл, что у MD5 и SHA-256: три байта в `buffer[0…2]`, `buflen = 3`, `count = 3`. Сжатия нет.
 
+`srcs/whirlpool/whirlpool.c`, строки 95–113:
+
+```c
+void	whirlpool_update(void *ctx, const uint8_t *data, size_t len)   // data = 61 62 63, len = 3
+{
+	t_whirlpool_ctx	*c;
+	size_t			i;
+
+	c = (t_whirlpool_ctx *)ctx;
+	i = 0;
+	while (i < len)                              // i = 0, 1, 2
+	{
+		c->buffer[c->buflen++] = data[i];        // buffer[0…2] = 61 62 63
+		if (c->buflen == 64)                     // не срабатывает
+		{
+			whirlpool_transform(c, c->buffer);
+			c->buflen = 0;
+		}
+		i++;
+	}
+	c->count += len;                             // count = 3
+}
+```
+
 ## 4. `whirlpool_final`: паддинг
 
 Стандарт Whirlpool отводит под длину 256 бит (32 байта). Значит, `0x80` и нули должны закончиться на байте 31, а не 55.
 
+`srcs/whirlpool/whirlpool.c`, строки 115–154:
+
 ```c
-bits = c->count * 8;
-c->buffer[c->buflen++] = 0x80;
-if (c->buflen > 32)
+void	whirlpool_final(uint8_t *digest, void *ctx)
 {
-	while (c->buflen < 64)
-		c->buffer[c->buflen++] = 0x00;
-	whirlpool_transform(c, c->buffer);
-	c->buflen = 0;
+	t_whirlpool_ctx	*c;
+	uint64_t		bits;
+	int				i;
+
+	c = (t_whirlpool_ctx *)ctx;
+	bits = c->count * 8;                         // 3 * 8 = 24 = 0x18
+	c->buffer[c->buflen++] = 0x80;               // buffer[3] = 0x80, buflen = 4
+	if (c->buflen > 32)                          // 4 > 32 ложно: место под длину есть
+	{
+		while (c->buflen < 64)
+			c->buffer[c->buflen++] = 0x00;
+		whirlpool_transform(c, c->buffer);       // нужно только при хвосте 32–63 байта
+		c->buflen = 0;
+	}
+	while (c->buflen < 32)
+		c->buffer[c->buflen++] = 0x00;           // buffer[4…31] = 0, buflen = 32
+	ft_memset(c->buffer + 32, 0, 24);            // buffer[32…55] = 0: старшие 24 байта длины
+	i = 7;
+	while (i >= 0)                               // как в SHA-256: старший байт первым
+	{
+		c->buffer[56 + (7 - i)] = (uint8_t)(bits >> (i * 8));
+		// i = 7…1: buffer[56…62] = 0x00
+		// i = 0:   buffer[63]     = 0x18
+		i--;
+	}
+	whirlpool_transform(c, c->buffer);           // разделы 5–7
+	i = 0;
+	while (i < 8)                                // раздел 8: 8 слов → 64 байта
+	{
+		digest[i * 8] = (uint8_t)(c->state[i] >> 56);
+		digest[i * 8 + 1] = (uint8_t)(c->state[i] >> 48);
+		digest[i * 8 + 2] = (uint8_t)(c->state[i] >> 40);
+		digest[i * 8 + 3] = (uint8_t)(c->state[i] >> 32);
+		digest[i * 8 + 4] = (uint8_t)(c->state[i] >> 24);
+		digest[i * 8 + 5] = (uint8_t)(c->state[i] >> 16);
+		digest[i * 8 + 6] = (uint8_t)(c->state[i] >> 8);
+		digest[i * 8 + 7] = (uint8_t)(c->state[i]);
+		i++;
+	}
 }
-while (c->buflen < 32)
-	c->buffer[c->buflen++] = 0x00;
-ft_memset(c->buffer + 32, 0, 24);
 ```
+
+`ft_memset` для байтов 32–55 нужен, хотя цикл до 32 туда не пишет: в буфере может лежать мусор от прошлого блока. `whirlpool_init` обнулил буфер, но после первого же сжатия в `update` там остаются байты сообщения.
 
 Для `abc`:
 
@@ -143,7 +325,32 @@ state[7] = строка 7:    00   00   00   00   00   00   00   18
 
 Байт `t` слова `w` достаётся так: `(uint8_t)(w >> (56 - t * 8))`. При `t = 0` это сдвиг на 56, старший байт.
 
-`wp_load_block` собирает слова big-endian:
+`wp_load_block` собирает слова big-endian.
+
+`srcs/whirlpool/whirlpool.c`, строки 28–45:
+
+```c
+static void	wp_load_block(uint64_t *dst, const uint8_t *block)
+{
+	int	i;
+
+	i = 0;
+	while (i < 8)                                    // 8 слов по 8 байт
+	{
+		dst[i] = ((uint64_t)block[i * 8] << 56)      // i = 0: 0x61 → столбец 0 (биты 56–63)
+			| ((uint64_t)block[i * 8 + 1] << 48)     //        0x62 → столбец 1
+			| ((uint64_t)block[i * 8 + 2] << 40)     //        0x63 → столбец 2
+			| ((uint64_t)block[i * 8 + 3] << 32)     //        0x80 → столбец 3
+			| ((uint64_t)block[i * 8 + 4] << 24)     //        0x00
+			| ((uint64_t)block[i * 8 + 5] << 16)
+			| ((uint64_t)block[i * 8 + 6] << 8)
+			| ((uint64_t)block[i * 8 + 7]);          // i = 7: 0x18 → столбец 7 (биты 0–7)
+		i++;
+	}
+}
+```
+
+Приведение к `uint64_t` до сдвига обязательно: сдвиг `int` на 56 бит — неопределённое поведение.
 
 | i | байты блока | blk[i] |
 |---|---|---|
@@ -173,8 +380,13 @@ state[7] = строка 7:    00   00   00   00   00   00   00   18
 
 ### 6.2. Код
 
+`srcs/whirlpool/whirlpool.c`, строки 4–5 и 7–26:
+
 ```c
-static uint64_t	wp_round(const uint64_t *state, int row)
+extern const uint64_t	g_whirlpool_c0[256];    // таблица из whirlpool_tables.c
+extern const uint64_t	g_whirlpool_rc[10];     // константы раундов, там же
+
+static uint64_t	wp_round(const uint64_t *state, int row)   // считает строку row результата
 {
 	uint64_t	result;
 	uint64_t	c;
@@ -183,13 +395,16 @@ static uint64_t	wp_round(const uint64_t *state, int row)
 
 	result = 0;
 	t = 0;
-	while (t < 8)
+	while (t < 8)                                // t — номер столбца
 	{
 		idx = (uint8_t)(state[(row - t + 8) % 8] >> (56 - t * 8));
-		c = g_whirlpool_c0[idx];
+		// π: в строку row приезжает байт столбца t из строки row − t
+		// сдвиг на 56 − 8t ставит байт t в младшие 8 бит, (uint8_t) отрезает остальное
+		c = g_whirlpool_c0[idx];                 // γ + θ: S[idx], умноженный на строку MDS
 		if (t > 0)
-			c = (c >> (t * 8)) | (c << (64 - t * 8));
-		result ^= c;
+			c = (c >> (t * 8)) | (c << (64 - t * 8));   // поворот вправо на t байт
+		// при t = 0 поворота нет: сдвиг uint64_t на 64 был бы неопределённым поведением
+		result ^= c;                             // сумма в GF(2^8) — это XOR
 		t++;
 	}
 	return (result);
@@ -209,7 +424,19 @@ static uint64_t	wp_round(const uint64_t *state, int row)
 
 Как умножить байт на 2: сдвинуть влево на 1; если вылез бит 8, сделать XOR с `0x11D`. Умножение на 4 и 8 — это два и три таких удвоения. На 5 — `·4 ^ ·1`, на 9 — `·8 ^ ·1`.
 
-`C0[x]` — 8 байт подряд: `S[x]·1, S[x]·1, S[x]·4, S[x]·1, S[x]·8, S[x]·5, S[x]·2, S[x]·9`. Старший байт `C0[x]` равен `S[x]`, поэтому S-box можно прочитать прямо из таблицы. Первые 16 значений S-box:
+`C0[x]` — 8 байт подряд: `S[x]·1, S[x]·1, S[x]·4, S[x]·1, S[x]·8, S[x]·5, S[x]·2, S[x]·9`. Старший байт `C0[x]` равен `S[x]`, поэтому S-box можно прочитать прямо из таблицы.
+
+`srcs/whirlpool/whirlpool_tables.c`, строки 3–5:
+
+```c
+const uint64_t	g_whirlpool_c0[256] = {
+	0x18186018c07830d8ULL, 0x23238c2305af4626ULL,
+	// C0[0]: S[0] = 0x18 → 18·1 18·1 18·4 18·1 18·8 18·5 18·2 18·9 = 18 18 60 18 c0 78 30 d8
+	// C0[1]: S[1] = 0x23 → 23 23 8c 23 05 af 46 26 (здесь ·8 и ·9 уже требуют редукции по 0x11D)
+	// … всего 256 значений, строки 3–132
+```
+
+Первые 16 значений S-box:
 
 ```text
 S[00…0f] = 18 23 c6 e8 87 b8 01 4f 36 a6 d2 f5 79 6f 91 52
@@ -232,10 +459,21 @@ S[00…0f] = 18 23 c6 e8 87 b8 01 4f 36 a6 d2 f5 79 6f 91 52
 
 ### 6.4. Константы раунда
 
+`srcs/whirlpool/whirlpool_tables.c`, строки 134–145:
+
 ```c
 const uint64_t	g_whirlpool_rc[10] = {
-	0x1823c6e887b8014fULL,
-	0x36a6d2f5796f9152ULL,
+	0x1823c6e887b8014fULL,      // rc[0] = S[0…7]   — раунд 1
+	0x36a6d2f5796f9152ULL,      // rc[1] = S[8…15]  — раунд 2
+	0x60bc9b8ea30c7b35ULL,      // rc[2] = S[16…23]
+	0x1de0d7c22e4bfe57ULL,
+	0x157737e59ff04adaULL,
+	0x58c9290ab1a06b85ULL,
+	0xbd5d10f4cb3e0567ULL,
+	0xe427418ba77d95d8ULL,
+	0xfbee7c66dd17479eULL,
+	0xca2dbf07ad5a8333ULL       // rc[9] = S[72…79] — раунд 10
+};
 ```
 
 `rc[r]` — восемь подряд идущих байт S-box: `S[8r], S[8r+1], …, S[8r+7]`. `rc[0] = 18 23 c6 e8 87 b8 01 4f` — первые восемь байт из строки выше. Константа ксорится только в строку 0 ключа (`nk[0] ^= …`). Остальные строки константы нулевые.
@@ -244,34 +482,68 @@ const uint64_t	g_whirlpool_rc[10] = {
 
 ### 7.1. Подготовка
 
+`srcs/whirlpool/whirlpool.c`, строки 47–63:
+
 ```c
-wp_load_block(blk, block);
-i = -1;
-while (++i < 8)
+static void	whirlpool_transform(t_whirlpool_ctx *ctx, const uint8_t block[64])
 {
-	k[i] = ctx->state[i];
-	s[i] = blk[i] ^ k[i];
-}
+	uint64_t	k[8];          // ключ раунда
+	uint64_t	s[8];          // текст шифра
+	uint64_t	nk[8];         // новый ключ, пока считается
+	uint64_t	ns[8];         // новый текст, пока считается
+	uint64_t	blk[8];        // исходный блок, нужен в самом конце
+	int			i;
+	int			r;
+
+	wp_load_block(blk, block);         // blk[0] = 6162638000000000, blk[7] = 0000000000000018
+	i = -1;
+	while (++i < 8)                    // i = 0 … 7
+	{
+		k[i] = ctx->state[i];          // первый блок: k = 0
+		s[i] = blk[i] ^ k[i];          // s = blk ^ 0 = blk
+	}
 ```
+
+`i = -1` и `while (++i < 8)` — та же итерация по `i = 0…7`, просто инкремент стоит в условии.
 
 Ключ `k` — текущее состояние, для первого блока это нули. Текст шифра `s = blk ^ k = blk`. Это первое применение σ: стандарт ксорит текст с нулевым ключом раунда до начала раундов.
 
 ### 7.2. Цикл раундов
 
+`srcs/whirlpool/whirlpool.c`, строки 64–81:
+
 ```c
-while (r < 10)
-{
-	i = -1;
-	while (++i < 8)
-		nk[i] = wp_round(k, i);
-	nk[0] ^= g_whirlpool_rc[r];
-	k = nk;
-	i = -1;
-	while (++i < 8)
+	r = 0;
+	while (r < 10)                             // r = 0 … 9, раунды 1 … 10
+	{
+		i = -1;
+		while (++i < 8)
+			nk[i] = wp_round(k, i);            // ρ без σ для каждой строки ключа
+		nk[0] ^= g_whirlpool_rc[r];            // σ ключа: константа только в строку 0
+		i = -1;
+		while (++i < 8)
+			k[i] = nk[i];                      // ключ раунда r + 1 готов
+		i = -1;
+		while (++i < 8)
+			ns[i] = wp_round(s, i) ^ k[i];     // ρ текста и σ с новым ключом
+		i = -1;
+		while (++i < 8)
+			s[i] = ns[i];
+		r++;
+	}
+```
+
+Первая итерация (`r = 0`) со значениями:
+
+```c
+		nk[i] = wp_round(k, i);            // k = 0 → nk[0…7] = 2828282828282828
+		nk[0] ^= g_whirlpool_rc[0];        // 2828282828282828 ^ 1823c6e887b8014f = 300beec0af902967
+		k[i] = nk[i];                      // k[0] = 300beec0af902967, k[1…7] = 2828282828282828
 		ns[i] = wp_round(s, i) ^ k[i];
-	s = ns;
-	r++;
-}
+		// ns[0] = 3f3f743f90630687 ^ 300beec0af902967 = 0f349aff3ff32fe0
+		// ns[3] = a12baba7a72ea724 ^ 2828282828282828 = 8903838f8f068f0c
+		// ns[4] = 2828282828282828 ^ 2828282828282828 = 0000000000000000
+		s[i] = ns[i];                      // полная таблица — в разделе 7.6
 ```
 
 Два параллельных процесса:
@@ -282,6 +554,16 @@ while (r < 10)
 Временные массивы `nk` и `ns` нужны потому, что `wp_round` для строки 1 читает строку 0 старого значения. Перезапись на месте испортила бы следующие строки.
 
 ### 7.3. Раунд 1, ключ, строка 0
+
+Вызов `wp_round(k, 0)` из строки 69 `whirlpool.c`, цикл по `t` со значениями:
+
+```c
+		idx = (uint8_t)(state[(0 - t + 8) % 8] >> (56 - t * 8));   // state = k = 0 → idx = 0 всегда
+		c = g_whirlpool_c0[0];                                     // 18186018c07830d8
+		if (t > 0)
+			c = (c >> (t * 8)) | (c << (64 - t * 8));              // t = 1: d818186018c07830, …
+		result ^= c;                                               // после t = 7: 2828282828282828
+```
 
 `k` целиком нулевой, поэтому все восемь байт — `00`, и все восемь раз берётся `C0[00]`:
 
@@ -306,7 +588,24 @@ k[0] после раунда 1 = 300beec0af902967
 
 ### 7.4. Раунд 1, текст, строка 0
 
-`s` перед раундом — это `blk`. В строке 0 результата участвует байт 0 из `s[0]`, байт 1 из `s[7]`, байт 2 из `s[6]` и так далее по диагонали:
+`s` перед раундом — это `blk`. В строке 0 результата участвует байт 0 из `s[0]`, байт 1 из `s[7]`, байт 2 из `s[6]` и так далее по диагонали.
+
+Вызов `wp_round(s, 0)` из строки 76 `whirlpool.c`, первые две итерации:
+
+```c
+		// t = 0
+		idx = (uint8_t)(state[(0 - 0 + 8) % 8] >> 56);   // state[0] = 6162638000000000 → 0x61
+		c = g_whirlpool_c0[0x61];                        // 0f0f3c0f78331e77
+		result ^= c;                                     // result = 0f0f3c0f78331e77
+		// t = 1
+		idx = (uint8_t)(state[(0 - 1 + 8) % 8] >> 48);   // state[7] = 0000000000000018 → 0x00
+		c = g_whirlpool_c0[0x00];                        // 18186018c07830d8
+		c = (c >> 8) | (c << 56);                        // d818186018c07830
+		result ^= c;                                     // result = d717246f60f36647
+		// t = 2 … 7: везде байт 00, итог после t = 7: 3f3f743f90630687
+```
+
+Все восемь слагаемых:
 
 | t | слово s[(0−t) mod 8] | байт t | C0[байт] | сдвиг вправо на t байт |
 |---|---|---|---|---|
@@ -501,8 +800,16 @@ s[3] после раунда 1 = 8903838f8f068f0c
 
 ### 7.7. Финал блока: Miyaguchi–Preneel
 
+`srcs/whirlpool/whirlpool.c`, строки 82–85:
+
 ```c
-ctx->state[i] ^= s[i] ^ blk[i];
+	i = -1;
+	while (++i < 8)
+		ctx->state[i] ^= s[i] ^ blk[i];
+		// i = 0: 0 ^ 2f462b24c6f486bb ^ 6162638000000000 = 4e2448a4c6f486bb
+		// i = 1…6: blk[i] = 0, state[i] = s[i]
+		// i = 7: 0 ^ d225292076d4eeed ^ 0000000000000018 = d225292076d4eef5
+}
 ```
 
 `^=` даёт три слагаемых: старое состояние, выход шифра и исходный блок. Для первого блока старое состояние нулевое.
@@ -522,17 +829,60 @@ ctx->state[i] ^= s[i] ^ blk[i];
 
 ## 8. Выгрузка и печать
 
+`srcs/whirlpool/whirlpool.c`, строки 140–154:
+
 ```c
-digest[i * 8]     = (uint8_t)(c->state[i] >> 56);
-digest[i * 8 + 1] = (uint8_t)(c->state[i] >> 48);
-…
-digest[i * 8 + 7] = (uint8_t)(c->state[i]);
+	whirlpool_transform(c, c->buffer);                   // state[0] = 4e2448a4c6f486bb, …
+	i = 0;
+	while (i < 8)
+	{
+		digest[i * 8] = (uint8_t)(c->state[i] >> 56);    // i = 0: 4e
+		digest[i * 8 + 1] = (uint8_t)(c->state[i] >> 48);//        24
+		digest[i * 8 + 2] = (uint8_t)(c->state[i] >> 40);//        48
+		digest[i * 8 + 3] = (uint8_t)(c->state[i] >> 32);//        a4
+		digest[i * 8 + 4] = (uint8_t)(c->state[i] >> 24);//        c6
+		digest[i * 8 + 5] = (uint8_t)(c->state[i] >> 16);//        f4
+		digest[i * 8 + 6] = (uint8_t)(c->state[i] >> 8); //        86
+		digest[i * 8 + 7] = (uint8_t)(c->state[i]);      //        bb
+		i++;                                             // i = 1: 16 b6 56 2c 73 b4 02 0b, …
+	}
+}
+```
+
+`srcs/io.c`, строки 69–76:
+
+```c
+	i = 0;
+	while (i < size)                                  // size = 64
+	{
+		out[i * 2] = hex[(digest[i] >> 4) & 0x0f];    // i = 0: 0x4e → '4'
+		out[i * 2 + 1] = hex[digest[i] & 0x0f];       //               'e'
+		i++;
+	}
+	out[size * 2] = '\0';                             // out[128] = '\0', последний байт hex[129]
 ```
 
 Восемь слов по 8 байт, старший байт первым. Hex-строка — это слова `state[0…7]`, напечатанные подряд как `%016x`:
 
 ```text
 4e2448a4c6f486bb16b6562c73b4020bf3043e3a731bce721ae1b303d97e6d4c7181eebdb6c57e277d0e34957114cbd6c797fc9d95d8b582d225292076d4eef5
+```
+
+`srcs/output.c`, строки 51–62, последняя ветка `print_hash_result`:
+
+```c
+	ft_putstr_fd(ssl->hash->name_upper, 1);           // "WHIRLPOOL"
+	ft_putstr_fd(" (", 1);
+	if (!is_file)                                     // строка → в кавычках
+	{
+		ft_putstr_fd("\"", 1);
+		ft_putstr_fd(label, 1);                       // abc
+		ft_putstr_fd("\"", 1);
+	}
+	else
+		ft_putstr_fd(label, 1);
+	ft_putstr_fd(") = ", 1);
+	ft_putendl_fd(hex, 1);                            // 128 символов и '\n'
 ```
 
 ```text
@@ -551,6 +901,31 @@ $ ./ft_ssl whirlpool -q -s "1234567890…1234567890"
 `whirlpool_update` сжимает первые 64 байта, когда `buflen` доходит до 64. Второй блок начинается уже не с нулевого ключа, а с состояния после первого.
 
 `whirlpool_final`: хвост 16 байт, после `0x80` `buflen = 17`, это не больше 32, лишнего блока нет. Длина `640 = 0x280` в байтах 62–63.
+
+`srcs/whirlpool/whirlpool.c`, строки 122–140, для `count = 80`, `buflen = 16`:
+
+```c
+	bits = c->count * 8;                         // 640 = 0x280
+	c->buffer[c->buflen++] = 0x80;               // buffer[16] = 0x80, buflen = 17
+	if (c->buflen > 32)                          // 17 > 32 ложно
+	{
+		while (c->buflen < 64)
+			c->buffer[c->buflen++] = 0x00;
+		whirlpool_transform(c, c->buffer);
+		c->buflen = 0;
+	}
+	while (c->buflen < 32)
+		c->buffer[c->buflen++] = 0x00;           // buffer[17…31] = 0
+	ft_memset(c->buffer + 32, 0, 24);            // buffer[32…55]: здесь лежали байты 32–55
+	                                             // первого блока, memset их стирает
+	i = 7;
+	while (i >= 0)
+	{
+		c->buffer[56 + (7 - i)] = (uint8_t)(bits >> (i * 8));   // buffer[62] = 02, buffer[63] = 80
+		i--;
+	}
+	whirlpool_transform(c, c->buffer);           // блок 1, ключ = state после блока 0
+```
 
 | смещение | байты |
 |---|---|
@@ -582,6 +957,22 @@ $ ./ft_ssl whirlpool -q -s "1234567890…1234567890"
 Граница в два раза раньше, чем у MD5 и SHA-256 (там 56), из-за 32-байтного поля длины. Пример: сообщение длиной 40 байт в SHA-256 закроется одним блоком, а в Whirlpool — двумя.
 
 Как работает ветка для хвоста 40: `buflen` после `0x80` равен 41, условие `> 32` истинно. Нули до 64, `whirlpool_transform`, `buflen = 0`. Затем 32 нуля, 24 нуля из `ft_memset`, длина в 56–63, второй `whirlpool_transform`.
+
+`srcs/whirlpool/whirlpool.c`, строки 123–133, для хвоста 40 байт:
+
+```c
+	c->buffer[c->buflen++] = 0x80;               // buffer[40] = 0x80, buflen = 41
+	if (c->buflen > 32)                          // 41 > 32 — длина сюда не влезет
+	{
+		while (c->buflen < 64)
+			c->buffer[c->buflen++] = 0x00;       // buffer[41…63] = 0
+		whirlpool_transform(c, c->buffer);       // блок: 40 байт хвоста, 80, нули, без длины
+		c->buflen = 0;
+	}
+	while (c->buflen < 32)
+		c->buffer[c->buflen++] = 0x00;           // новый блок: buffer[0…31] = 0
+	ft_memset(c->buffer + 32, 0, 24);            // buffer[32…55] = 0, дальше длина в 56–63
+```
 
 Пустое сообщение: блок `80`, 55 нулей, восемь нулей длины. Хеш:
 

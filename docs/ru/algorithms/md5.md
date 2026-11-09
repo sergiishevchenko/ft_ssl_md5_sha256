@@ -2,7 +2,9 @@
 
 Документ проводит строку `abc` через весь код `ft_ssl` до готового хеша. Каждое число ниже посчитано тем же алгоритмом, что в `srcs/md5/md5.c`, и сверено с выводом программы и `openssl md5`.
 
-Общая схема программы (разбор флагов, форматы вывода) описана в [how-it-works.md](how-it-works.md). Здесь только MD5.
+Общая схема программы (разбор флагов, форматы вывода) описана в [how-it-works.md](../how-it-works.md). Здесь только MD5.
+
+У каждого шага есть фрагмент исходника: путь к файлу, номера строк и сам код без изменений. Комментарии `//` в фрагментах добавлены только в документе, в исходниках их нет. В комментариях — значения переменных для примера `abc`.
 
 ## Пример
 
@@ -54,23 +56,227 @@ MD5(stdin)= 900150983cd24fb0d6963f7d28e17f72
 
 Цепочка вызовов:
 
-1. `main`: `argc = 4`, поэтому интерактивный режим не нужен. `find_hash("md5")` проходит по `g_hashes` и возвращает первую запись: `{"MD5", "md5", 16, sizeof(t_md5_ctx), md5_init, md5_update, md5_final}`. В `ssl.cmd_index` записывается `2`.
-2. `execute_command` вызывает `parse_flags` с `i = 2`. `argv[2]` равен `-s`, следующий аргумент `abc` кладётся в `strings[0]`, `str_count = 1`, `i` становится 4 и цикл кончается: `4 == argc`.
-3. `-p` не задан, файлов нет. Цикл по строкам вызывает `process_string(ssl, "abc")`.
-4. `process_string` вызывает `hash_data(ssl->hash, "abc", 3, digest)`.
-5. `hash_data` выделяет `malloc(sizeof(t_md5_ctx))` и вызывает по указателям из записи `md5_init`, `md5_update`, `md5_final`. Указатели вызываются через `void *ctx`, поэтому каждая функция MD5 первым делом приводит его к `t_md5_ctx *`.
-6. После `md5_final` контекст освобождается, `digest_to_hex(digest, 16, hex)` делает строку, `print_hash_result` печатает её.
+```text
+main                         srcs/main.c
+ └─ find_hash("md5")         srcs/dispatcher.c
+ └─ execute_command          srcs/execute.c
+     └─ parse_flags
+     └─ process_string       srcs/output.c
+         └─ hash_data        srcs/io.c
+             ├─ md5_init     srcs/md5/md5.c
+             ├─ md5_update
+             └─ md5_final
+                 └─ md5_transform
+         └─ digest_to_hex    srcs/io.c
+         └─ print_hash_result srcs/output.c
+```
+
+### 1.1. `main`
+
+`srcs/main.c`, строки 3–21:
+
+```c
+int	main(int argc, char **argv)          // argc = 4, argv = {"./ft_ssl", "md5", "-s", "abc"}
+{
+	t_hash_func	*h;
+	t_ssl		ssl;
+
+	if (argc < 2)                        // 4 < 2 ложно, интерактивный режим не нужен
+		return (interactive_mode());
+	h = find_hash(argv[1]);              // find_hash("md5") → &g_hashes[0]
+	if (!h)                              // нашлось, ошибки нет
+	{
+		print_invalid_command(argv[1]);
+		return (1);
+	}
+	ssl.hash = h;                        // запись MD5: имена, размеры, три функции
+	ssl.argc = argc;                     // 4
+	ssl.argv = argv;
+	ssl.cmd_index = 2;                   // флаги начинаются с argv[2] = "-s"
+	return (execute_command(&ssl));
+}
+```
+
+### 1.2. `find_hash` и таблица команд
+
+`srcs/dispatcher.c`, строки 6–14 и 31–43:
+
+```c
+static t_hash_func	g_hashes[] = {
+	{"MD5", "md5", 16, sizeof(t_md5_ctx),        // ← эта запись, индекс 0
+		md5_init, md5_update, md5_final},        // указатели на функции из md5.c
+	{"SHA256", "sha256", 32, sizeof(t_sha256_ctx),
+		sha256_init, sha256_update, sha256_final},
+	{"WHIRLPOOL", "whirlpool", 64, sizeof(t_whirlpool_ctx),
+		whirlpool_init, whirlpool_update, whirlpool_final},
+	{NULL, NULL, 0, 0, NULL, NULL, NULL}
+};
+
+t_hash_func	*find_hash(const char *name)       // name = "md5"
+{
+	int	i;
+
+	i = 0;
+	while (g_hashes[i].name_lower)
+	{
+		if (ft_strcmp(g_hashes[i].name_lower, name) == 0)   // i = 0: "md5" == "md5"
+			return (&g_hashes[i]);                          // возврат на первой же итерации
+		i++;
+	}
+	return (NULL);
+}
+```
+
+Поля записи MD5:
+
+| поле | значение | где используется |
+|---|---|---|
+| `name_upper` | `"MD5"` | `print_hash_result`: `MD5 ("abc") = …` |
+| `name_lower` | `"md5"` | сравнение в `find_hash`, сообщения об ошибках |
+| `digest_size` | `16` | `digest_to_hex`: сколько байт превратить в hex |
+| `ctx_size` | `sizeof(t_md5_ctx)` = 96 | `hash_data`: сколько байт выделить под контекст |
+| `init`, `update`, `final` | `md5_init`, `md5_update`, `md5_final` | `hash_data` |
+
+### 1.3. `execute_command` и `parse_flags`
+
+`srcs/execute.c`, строки 5–39:
+
+```c
+static int	parse_flags(t_ssl *ssl, int *i,
+		const char **strings, int *str_count)
+{
+	*str_count = 0;
+	while (*i < ssl->argc)                               // итерация 1: *i = 2 < 4
+	{
+		if (ft_strcmp(ssl->argv[*i], "-p") == 0)         // "-s" не "-p"
+			ssl->flags.p = 1;
+		else if (ft_strcmp(ssl->argv[*i], "-q") == 0)    // не "-q"
+			ssl->flags.q = 1;
+		else if (ft_strcmp(ssl->argv[*i], "-r") == 0)    // не "-r"
+			ssl->flags.r = 1;
+		else if (ft_strcmp(ssl->argv[*i], "-s") == 0)    // совпало
+		{
+			if (*i + 1 >= ssl->argc)                     // 3 >= 4 ложно, аргумент есть
+			{
+				ft_putstr_fd("ft_ssl: ", 2);
+				ft_putstr_fd(ssl->hash->name_lower, 2);
+				ft_putendl_fd(": option requires an argument -- s", 2);
+				ssl->error = 1;
+				return (1);
+			}
+			(*i)++;                                      // *i = 3
+			if (*str_count < MAX_STRINGS)
+			{
+				strings[*str_count] = ssl->argv[*i];     // strings[0] = "abc"
+				(*str_count)++;                          // str_count = 1
+			}
+		}
+		else
+			break ;
+		(*i)++;                                          // *i = 4, цикл кончается: 4 < 4 ложно
+	}
+	return (0);
+}
+```
+
+`srcs/execute.c`, строки 41–77:
+
+```c
+int	execute_command(t_ssl *ssl)
+{
+	int			i;
+	int			had_target;
+	const char	*strings[MAX_STRINGS];
+	int			str_count;
+	int			j;
+
+	i = ssl->cmd_index;                                  // i = 2
+	ssl->flags.p = 0;
+	ssl->flags.q = 0;
+	ssl->flags.r = 0;
+	ssl->error = 0;
+	had_target = 0;
+	if (parse_flags(ssl, &i, strings, &str_count))       // вернул 0; i = 4, str_count = 1
+		return (1);
+	if (ssl->flags.p)                                    // -p нет, stdin не читается
+		process_stdin(ssl);
+	j = 0;
+	while (j < str_count)                                // одна итерация, j = 0
+	{
+		had_target = 1;
+		process_string(ssl, strings[j]);                 // process_string(ssl, "abc")
+		j++;
+	}
+	while (i < ssl->argc)                                // 4 < 4 ложно, файлов нет
+	{
+		had_target = 1;
+		process_file(ssl, ssl->argv[i]);
+		i++;
+	}
+	if (!had_target && !ssl->flags.p)                    // had_target = 1, stdin не нужен
+		process_stdin(ssl);
+	if (ssl->error)
+		return (1);
+	return (0);                                          // код выхода программы 0
+}
+```
+
+### 1.4. `process_string`
+
+`srcs/output.c`, строки 131–143:
+
+```c
+void	process_string(t_ssl *ssl, const char *str)      // str = "abc"
+{
+	uint8_t	digest[64];                                  // хватит на любой алгоритм, MD5 займёт 16
+	char	hex[129];                                    // MD5 займёт 32 символа + '\0'
+
+	if (hash_data(ssl->hash, (const uint8_t *)str, ft_strlen(str), digest))  // len = 3
+	{
+		print_io_error(ssl, str);
+		return ;
+	}
+	digest_to_hex(digest, ssl->hash->digest_size, hex);  // digest_size = 16
+	print_hash_result(ssl, str, hex, 0);                 // 0: это строка, а не файл
+}
+```
+
+### 1.5. `hash_data`
+
+`srcs/io.c`, строки 79–93:
+
+```c
+int	hash_data(t_hash_func *h, const uint8_t *data,
+		size_t len, uint8_t *digest)                     // data = "abc", len = 3
+{
+	void	*ctx;
+
+	ctx = malloc(h->ctx_size);                           // sizeof(t_md5_ctx) байт
+	if (!ctx)
+		return (1);
+	h->init(ctx);                                        // md5_init(ctx)
+	if (len > 0 && data)                                 // 3 > 0
+		h->update(ctx, data, len);                       // md5_update(ctx, "abc", 3)
+	h->final(digest, ctx);                               // md5_final(digest, ctx)
+	free(ctx);
+	return (0);
+}
+```
+
+Функции вызываются через `void *ctx`: `hash_data` не знает, какой алгоритм внутри. Поэтому каждая функция MD5 первой строкой приводит `ctx` к `t_md5_ctx *`.
 
 ## 2. Контекст
+
+`includes/md5.h`, строки 7–13:
 
 ```c
 typedef struct s_md5_ctx
 {
-	uint32_t	state[4];
-	uint64_t	count;
-	uint8_t		buffer[64];
-	uint32_t	buflen;
-}	t_md5_ctx;
+	uint32_t	state[4];      // A B C D, 4 × 32 бита = 128 бит будущего хеша
+	uint64_t	count;         // длина сообщения в байтах, для abc станет 3
+	uint8_t		buffer[64];    // недособранный блок
+	uint32_t	buflen;        // занято байт в buffer, 0…64
+}	t_md5_ctx;                 // 16 + 8 + 64 + 4 = 92 байта, с выравниванием 96
 ```
 
 | поле | смысл |
@@ -82,13 +288,21 @@ typedef struct s_md5_ctx
 
 ## 3. `md5_init`
 
-```text
-state[0] = A = 0x67452301
-state[1] = B = 0xefcdab89
-state[2] = C = 0x98badcfe
-state[3] = D = 0x10325476
-count    = 0
-buflen   = 0
+`srcs/md5/md5.c`, строки 106–117:
+
+```c
+void	md5_init(void *ctx)
+{
+	t_md5_ctx	*c;
+
+	c = (t_md5_ctx *)ctx;            // void * из hash_data → контекст MD5
+	c->state[0] = 0x67452301;        // A
+	c->state[1] = 0xefcdab89;        // B
+	c->state[2] = 0x98badcfe;        // C
+	c->state[3] = 0x10325476;        // D
+	c->count = 0;                    // байт сообщения ещё не было
+	c->buflen = 0;                   // буфер пуст; сам buffer не обнуляется, там мусор из malloc
+}
 ```
 
 Константы выбраны так, чтобы в памяти little-endian они читались как простой счёт:
@@ -104,6 +318,30 @@ D в памяти: 76 54 32 10
 
 ## 4. `md5_update(ctx, "abc", 3)`
 
+`srcs/md5/md5.c`, строки 119–137:
+
+```c
+void	md5_update(void *ctx, const uint8_t *data, size_t len)   // data = 61 62 63, len = 3
+{
+	t_md5_ctx	*c;
+	size_t		i;
+
+	c = (t_md5_ctx *)ctx;
+	i = 0;
+	while (i < len)                              // i = 0, 1, 2
+	{
+		c->buffer[c->buflen++] = data[i];        // buffer[0] = 61, buffer[1] = 62, buffer[2] = 63
+		if (c->buflen == 64)                     // buflen = 1, 2, 3 — до 64 далеко
+		{
+			md5_transform(c, c->buffer);         // для abc ни разу не вызывается
+			c->buflen = 0;
+		}
+		i++;
+	}
+	c->count += len;                             // count = 0 + 3 = 3
+}
+```
+
 Цикл кладёт байты по одному:
 
 | `i` | `data[i]` | запись | `buflen` после | 64 байта набралось? |
@@ -118,38 +356,106 @@ D в памяти: 76 54 32 10
 
 ## 5. `md5_final`: паддинг
 
-### 5.1. Длина в битах
+Вся функция целиком, дальше она разобрана по частям.
 
-```text
-bits = count * 8 = 3 * 8 = 24 = 0x0000000000000018
+`srcs/md5/md5.c`, строки 139–174:
+
+```c
+void	md5_final(uint8_t *digest, void *ctx)
+{
+	t_md5_ctx	*c;
+	uint64_t	bits;
+	int			i;
+
+	c = (t_md5_ctx *)ctx;
+	bits = c->count * 8;                         // 5.1: 3 * 8 = 24
+	c->buffer[c->buflen++] = 0x80;               // 5.2: buffer[3] = 80, buflen = 4
+	while (c->buflen != 56)                      // 5.3: нули до байта 56
+	{
+		if (c->buflen == 64)
+		{
+			md5_transform(c, c->buffer);
+			c->buflen = 0;
+		}
+		if (c->buflen != 56)
+			c->buffer[c->buflen++] = 0x00;
+	}
+	i = 0;
+	while (i < 8)                                // 5.4: длина в байтах 56–63
+	{
+		c->buffer[56 + i] = (uint8_t)(bits >> (i * 8));
+		i++;
+	}
+	md5_transform(c, c->buffer);                 // раздел 6: сжатие последнего блока
+	i = 0;
+	while (i < 4)                                // раздел 7: state → 16 байт дайджеста
+	{
+		digest[i * 4] = (uint8_t)(c->state[i]);
+		digest[i * 4 + 1] = (uint8_t)(c->state[i] >> 8);
+		digest[i * 4 + 2] = (uint8_t)(c->state[i] >> 16);
+		digest[i * 4 + 3] = (uint8_t)(c->state[i] >> 24);
+		i++;
+	}
+}
 ```
 
+### 5.1. Длина в битах
+
+`srcs/md5/md5.c`, строка 146:
+
+```c
+	bits = c->count * 8;          // count = 3 → bits = 24 = 0x0000000000000018
+```
+
+Длина считается до паддинга: дальше `buflen` будет расти, а `count` — нет.
+
 ### 5.2. Байт `0x80`
+
+`srcs/md5/md5.c`, строка 147:
+
+```c
+	c->buffer[c->buflen++] = 0x80;    // buflen = 3: buffer[3] = 0x80, затем buflen = 4
+```
 
 `buffer[3] = 0x80`, `buflen = 4`. `0x80` — это `10000000`: одна единица сразу после сообщения и семь нулевых бит. Без этой единицы сообщения `abc` и `abc\0` после дополнения нулями выглядели бы одинаково.
 
 ### 5.3. Нули до байта 56
 
+`srcs/md5/md5.c`, строки 148–157:
+
 ```c
-while (c->buflen != 56)
-{
-	if (c->buflen == 64)
+	while (c->buflen != 56)                      // входим с buflen = 4
 	{
-		md5_transform(c, c->buffer);
-		c->buflen = 0;
-	}
-	if (c->buflen != 56)
-		c->buffer[c->buflen++] = 0x00;
-}
+		if (c->buflen == 64)                     // для abc никогда: buflen не превысит 56
+		{
+			md5_transform(c, c->buffer);         // нужно, только если хвост был 56–63 байта
+			c->buflen = 0;
+		}
+		if (c->buflen != 56)
+			c->buffer[c->buflen++] = 0x00;       // buffer[4] … buffer[55] = 0, 52 итерации
+	}                                            // выходим с buflen = 56
 ```
 
 `buflen` идёт от 4 до 56, ветка `== 64` не срабатывает. Записывается 52 нулевых байта: `buffer[4]…buffer[55]`.
 
 ### 5.4. Длина little-endian
 
+`srcs/md5/md5.c`, строки 158–163:
+
 ```c
-c->buffer[56 + i] = (uint8_t)(bits >> (i * 8));
+	i = 0;
+	while (i < 8)
+	{
+		c->buffer[56 + i] = (uint8_t)(bits >> (i * 8));
+		// i = 0: buffer[56] = (uint8_t)(24 >> 0)  = 0x18
+		// i = 1: buffer[57] = (uint8_t)(24 >> 8)  = 0x00
+		// …
+		// i = 7: buffer[63] = (uint8_t)(24 >> 56) = 0x00
+		i++;
+	}
 ```
+
+Приведение `(uint8_t)` отрезает всё, кроме младших 8 бит сдвинутого числа.
 
 | `i` | `bits >> (i*8)` | байт | позиция |
 |---|---|---|---|
@@ -174,11 +480,31 @@ c->buffer[56 + i] = (uint8_t)(bits >> (i * 8));
 
 ### 6.1. Слова сообщения
 
-Блок режется на 16 слов по 4 байта. Байт с меньшим адресом становится младшим:
+Блок режется на 16 слов по 4 байта. Байт с меньшим адресом становится младшим.
+
+`srcs/md5/md5.c`, строки 57–73:
 
 ```c
-m[i] = block[i*4] | block[i*4+1] << 8 | block[i*4+2] << 16 | block[i*4+3] << 24;
+static void	md5_transform(t_md5_ctx *ctx, const uint8_t block[64])   // block = ctx->buffer
+{
+	uint32_t	m[16];
+	uint32_t	a;
+	uint32_t	f;
+	uint32_t	tmp;
+	uint32_t	i;
+
+	i = 0;
+	while (i < 16)
+	{
+		m[i] = (uint32_t)block[i * 4]                // i = 0: 0x61        → биты 0–7
+			| ((uint32_t)block[i * 4 + 1] << 8)      //        0x62 << 8   → биты 8–15
+			| ((uint32_t)block[i * 4 + 2] << 16)     //        0x63 << 16  → биты 16–23
+			| ((uint32_t)block[i * 4 + 3] << 24);    //        0x80 << 24  → биты 24–31
+		i++;                                         // m[0] = 0x80636261
+	}                                                // m[14] = 0x00000018, остальные 0
 ```
+
+Приведение к `uint32_t` перед сдвигом обязательно: без него `0x80 << 24` считался бы в `int` и залез бы в знаковый бит.
 
 Для `m[0]`: байты `61 62 63 80` дают `0x80636261`. Порядок «перевернулся», потому что `61` ушёл в младший разряд.
 
@@ -205,19 +531,27 @@ m[i] = block[i*4] | block[i*4+1] << 8 | block[i*4+2] << 16 | block[i*4+3] << 24;
 
 ### 6.2. Рабочие регистры
 
-В коде состояние сначала копируется в переменные с неговорящими именами (`f`, `tmp`, `i` здесь не функция и не счётчик), а потом во вторые копии:
+В коде состояние сначала копируется в переменные с неговорящими именами (`f`, `tmp`, `i` здесь не функция и не счётчик), а потом во вторые копии.
+
+`srcs/md5/md5.c`, строки 74–87:
 
 ```c
-a = ctx->state[0];
-f = ctx->state[1];
-tmp = ctx->state[2];
-i = ctx->state[3];
-{
-	uint32_t	aa = a;
-	uint32_t	bb = f;
-	uint32_t	cc = tmp;
-	uint32_t	dd = i;
+	a = ctx->state[0];               // 67452301
+	f = ctx->state[1];               // efcdab89
+	tmp = ctx->state[2];             // 98badcfe
+	i = ctx->state[3];               // 10325476 — i больше не счётчик, а регистр D
+	{
+		uint32_t	aa = a;          // a = 67452301
+		uint32_t	bb = f;          // b = efcdab89
+		uint32_t	cc = tmp;        // c = 98badcfe
+		uint32_t	dd = i;          // d = 10325476
+		uint32_t	j = 0;           // номер шага, 0…63
+		uint32_t	fv;              // значение нелинейной функции
+		uint32_t	gv;              // индекс слова сообщения
+		uint32_t	temp;            // для перестановки регистров
 ```
+
+`ctx->state` во время 64 шагов не трогается: он понадобится в конце для сложения.
 
 Дальше работают только `aa bb cc dd`. Ниже они названы `a b c d`. Перед шагом 0:
 
@@ -227,15 +561,66 @@ a = 67452301   b = efcdab89   c = 98badcfe   d = 10325476
 
 ### 6.3. Один шаг
 
+`srcs/md5/md5.c`, строки 88–98:
+
 ```c
-fv = md5_f(j, bb, cc, dd);
-gv = md5_g(j);
-temp = dd;
-dd = cc;
-cc = bb;
-bb = bb + left_rotate(aa + fv + g_t[j] + m[gv], g_s[j]);
-aa = temp;
+		while (j < 64)
+		{
+			fv = md5_f(j, bb, cc, dd);       // F, G, H или I — зависит от j
+			gv = md5_g(j);                   // какое из m[0…15] взять
+			temp = dd;                       // старое d станет новым a
+			dd = cc;                         // d ← c
+			cc = bb;                         // c ← b
+			bb = bb + left_rotate(aa + fv + g_t[j] + m[gv], g_s[j]);   // b ← новое значение
+			aa = temp;                       // a ← старое d
+			j++;
+		}
 ```
+
+Порядок присваиваний важен: `cc = bb` выполняется раньше, чем `bb` перезаписывается, а в формуле для `bb` справа стоит ещё старое `bb`. `aa` в формуле тоже старое: оно перезаписывается последней строкой.
+
+Три вспомогательные функции.
+
+`srcs/md5/md5.c`, строки 30–39:
+
+```c
+static uint32_t	md5_f(uint32_t i, uint32_t b, uint32_t c, uint32_t d)
+{
+	if (i < 16)
+		return ((b & c) | (~b & d));     // раунд 1, F: где b = 1 — бит c, где b = 0 — бит d
+	if (i < 32)
+		return ((d & b) | (~d & c));     // раунд 2, G: где d = 1 — бит b, где d = 0 — бит c
+	if (i < 48)
+		return (b ^ c ^ d);              // раунд 3, H: чётность
+	return (c ^ (b | ~d));               // раунд 4, I
+}
+```
+
+`srcs/md5/md5.c`, строки 41–50:
+
+```c
+static uint32_t	md5_g(uint32_t i)
+{
+	if (i < 16)
+		return (i);                      // 0, 1, 2, …, 15
+	if (i < 32)
+		return ((5 * i + 1) % 16);       // i = 16 → 81 % 16 = 1, i = 17 → 86 % 16 = 6, …
+	if (i < 48)
+		return ((3 * i + 5) % 16);       // i = 32 → 101 % 16 = 5, …
+	return ((7 * i) % 16);               // i = 48 → 336 % 16 = 0, i = 49 → 7, …
+}
+```
+
+`srcs/md5/md5.c`, строки 52–55:
+
+```c
+static uint32_t	left_rotate(uint32_t x, uint32_t n)
+{
+	return ((x << n) | (x >> (32 - n)));  // старшие n бит уходят влево и возвращаются справа
+}
+```
+
+`n` всегда от 4 до 23, поэтому сдвиг на `32 - n` никогда не равен 32. Сдвиг `uint32_t` на 32 в C — неопределённое поведение.
 
 Словами: посчитать нелинейную функцию от `b c d`, сложить с `a`, константой `T[j]` и словом сообщения, повернуть влево на `s[j]` бит, прибавить `b`. Это новое `b`. Остальные регистры сдвигаются по кругу: `a ← d`, `c ← b`, `d ← c`.
 
@@ -244,6 +629,24 @@ aa = temp;
 ### 6.4. Шаг 0 полностью
 
 `j = 0`, раунд 1, функция `F`, `g = 0`, `T[0] = d76aa478`, `s[0] = 7`.
+
+Первая итерация цикла со значениями:
+
+```c
+			fv = md5_f(0, 0xefcdab89, 0x98badcfe, 0x10325476);   // j < 16 → F → 0x98badcfe
+			gv = md5_g(0);                                       // 0
+			temp = dd;                                           // temp = 0x10325476
+			dd = cc;                                             // dd = 0x98badcfe
+			cc = bb;                                             // cc = 0xefcdab89
+			bb = bb + left_rotate(aa + fv + g_t[0] + m[0], g_s[0]);
+			// aa + fv + g_t[0] + m[0] = 67452301 + 98badcfe + d76aa478 + 80636261 = 57ce06d8
+			// left_rotate(57ce06d8, 7) = e7036c2b
+			// bb = efcdab89 + e7036c2b = d6d117b4
+			aa = temp;                                           // aa = 0x10325476
+			j++;                                                 // j = 1
+```
+
+То же самое по операциям:
 
 ```text
 b & c          = efcdab89 & 98badcfe = 88888888
@@ -269,7 +672,30 @@ rotl(сумма, 7) = 11100111000000110110110000101011
 
 ### 6.5. Откуда константы шага
 
+`srcs/md5/md5.c`, строки 4–9 (начало таблицы `T`):
+
+```c
+static const uint32_t	g_t[64] = {
+	0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee,    // T[0…3]:  floor(2^32 · |sin 1…4|)
+	0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,    // T[4…7]
+	0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be,    // T[8…11]
+	0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,    // T[12…15], конец раунда 1
+	0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa,    // T[16…19], начало раунда 2
+	// … всего 64 значения, строки 4–21
+```
+
 `T[j]` (`g_t`) — целая часть \(2^{32} \cdot |\sin(j+1)|\), где `j+1` в радианах. Для `j = 0`: \(|\sin 1| \approx 0.8414709848\), \(0.8414709848 \cdot 2^{32} \approx 3614090360.3\), целая часть `3614090360 = 0xd76aa478`.
+
+`srcs/md5/md5.c`, строки 23–28:
+
+```c
+static const uint32_t	g_s[64] = {
+	7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,    // s[0…15],  раунд 1
+	5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,        // s[16…31], раунд 2
+	4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,    // s[32…47], раунд 3
+	6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21     // s[48…63], раунд 4
+};
+```
 
 `s[j]` (`g_s`) — величина поворота. В каждом раунде четыре значения повторяются четыре раза:
 
@@ -389,11 +815,15 @@ rotl(сумма, 7) = 11100111000000110110110000101011
 
 ### 6.7. Сложение с состоянием
 
+`srcs/md5/md5.c`, строки 99–104:
+
 ```c
-ctx->state[0] += aa;
-ctx->state[1] += bb;
-ctx->state[2] += cc;
-ctx->state[3] += dd;
+		ctx->state[0] += aa;     // 67452301 + 310ade8f = 98500190
+		ctx->state[1] += bb;     // efcdab89 + c08226b3 = b04fd23c   (перенос отброшен)
+		ctx->state[2] += cc;     // 98badcfe + e484b9d8 = 7d3f96d6   (перенос отброшен)
+		ctx->state[3] += dd;     // 10325476 + 624d8cb2 = 727fe128
+	}
+}
 ```
 
 | регистр | state до блока | после 64 шагов | state после блока |
@@ -407,11 +837,22 @@ ctx->state[3] += dd;
 
 ## 7. Выгрузка дайджеста
 
+`md5_transform` вернулся в `md5_final`, осталось выложить `state` в массив `digest`.
+
+`srcs/md5/md5.c`, строки 164–173:
+
 ```c
-digest[i * 4]     = (uint8_t)(c->state[i]);
-digest[i * 4 + 1] = (uint8_t)(c->state[i] >> 8);
-digest[i * 4 + 2] = (uint8_t)(c->state[i] >> 16);
-digest[i * 4 + 3] = (uint8_t)(c->state[i] >> 24);
+	md5_transform(c, c->buffer);                         // state = 98500190 b04fd23c 7d3f96d6 727fe128
+	i = 0;
+	while (i < 4)
+	{
+		digest[i * 4] = (uint8_t)(c->state[i]);          // i = 0: digest[0] = 0x90
+		digest[i * 4 + 1] = (uint8_t)(c->state[i] >> 8); //        digest[1] = 0x01
+		digest[i * 4 + 2] = (uint8_t)(c->state[i] >> 16);//       digest[2] = 0x50
+		digest[i * 4 + 3] = (uint8_t)(c->state[i] >> 24);//       digest[3] = 0x98
+		i++;                                             // i = 1: digest[4…7] = 3c d2 4f b0, и т. д.
+	}
+}
 ```
 
 Каждое слово пишется младшим байтом вперёд, так же как читались слова сообщения.
@@ -423,6 +864,27 @@ digest[i * 4 + 3] = (uint8_t)(c->state[i] >> 24);
 | C | `7d3f96d6` | `d6 96 3f 7d` |
 | D | `727fe128` | `28 e1 7f 72` |
 
+`md5_final` возвращается в `hash_data`, тот освобождает контекст и возвращает 0 в `process_string`. Следующий вызов — `digest_to_hex`.
+
+`srcs/io.c`, строки 64–77:
+
+```c
+void	digest_to_hex(uint8_t *digest, int size, char *out)   // size = 16
+{
+	static const char	hex[] = "0123456789abcdef";
+	int					i;
+
+	i = 0;
+	while (i < size)                                  // 16 итераций
+	{
+		out[i * 2] = hex[(digest[i] >> 4) & 0x0f];    // i = 0: 0x90 >> 4 = 9  → '9'
+		out[i * 2 + 1] = hex[digest[i] & 0x0f];       //        0x90 & 0x0f = 0 → '0'
+		i++;                                          // i = 1: 0x01 → '0', '1'
+	}
+	out[size * 2] = '\0';                             // out[32] = '\0', строка из 32 символов
+}
+```
+
 `digest_to_hex` превращает каждый байт в два символа: старшая тетрада — индекс в `"0123456789abcdef"`, потом младшая. Байт `0x90` даёт `9` и `0`, байт `0x01` даёт `0` и `1`.
 
 ```text
@@ -432,6 +894,47 @@ digest[i * 4 + 3] = (uint8_t)(c->state[i] >> 24);
 Типичная ошибка — печатать `state[0]` как число `%08x`. Получится `98500190…`, байты каждого слова будут в обратном порядке.
 
 ## 8. `print_hash_result`
+
+`srcs/output.c`, строки 28–63:
+
+```c
+void	print_hash_result(t_ssl *ssl, const char *label,
+		const char *hex, int is_file)                 // label = "abc", hex = "9001…7f72", is_file = 0
+{
+	if (ssl->flags.q)                                 // -q нет
+	{
+		ft_putendl_fd(hex, 1);
+		return ;
+	}
+	if (ssl->flags.r)                                 // -r нет
+	{
+		ft_putstr_fd(hex, 1);
+		ft_putstr_fd(" ", 1);
+		if (!is_file)
+		{
+			ft_putstr_fd("\"", 1);
+			ft_putstr_fd(label, 1);
+			ft_putstr_fd("\"", 1);
+		}
+		else
+			ft_putstr_fd(label, 1);
+		ft_putstr_fd("\n", 1);
+		return ;
+	}
+	ft_putstr_fd(ssl->hash->name_upper, 1);           // "MD5"
+	ft_putstr_fd(" (", 1);                            // "MD5 ("
+	if (!is_file)                                     // строка → в кавычках
+	{
+		ft_putstr_fd("\"", 1);
+		ft_putstr_fd(label, 1);                       // "MD5 (\"abc"
+		ft_putstr_fd("\"", 1);                        // "MD5 (\"abc\""
+	}
+	else
+		ft_putstr_fd(label, 1);
+	ft_putstr_fd(") = ", 1);                          // "MD5 (\"abc\") = "
+	ft_putendl_fd(hex, 1);                            // + хеш и '\n'
+}
+```
 
 Флагов `-q` и `-r` нет, срабатывает последняя ветка. `is_file == 0`, поэтому метка в кавычках:
 
@@ -458,9 +961,49 @@ $ ./ft_ssl md5 -q -s "1234567890…1234567890"
 
 Байты кладутся в `buffer`. На 64-м байте (`i = 63`) `buflen` становится 64, вызывается `md5_transform` для первого блока, `buflen` обнуляется. Оставшиеся 16 байт, байты 64–79 сообщения (`5678901234567890`), остаются в буфере. `count = 80`.
 
+`srcs/md5/md5.c`, строки 126–136, для `len = 80`:
+
+```c
+	while (i < len)                              // i = 0 … 79
+	{
+		c->buffer[c->buflen++] = data[i];        // i = 63: buffer[63] = '4', buflen = 64
+		if (c->buflen == 64)                     // истинно только при i = 63
+		{
+			md5_transform(c, c->buffer);         // блок 0: байты сообщения 0–63
+			c->buflen = 0;                       // i = 64…79 пишутся в buffer[0…15]
+		}
+		i++;
+	}
+	c->count += len;                             // count = 80, buflen = 16
+```
+
 ### 9.2. Что делает `md5_final`
 
 `bits = 640 = 0x280`. `buffer[16] = 0x80`, нули до 56, длина little-endian: `80 02 00 00 00 00 00 00`.
+
+`srcs/md5/md5.c`, строки 146–164, для `count = 80`, `buflen = 16`:
+
+```c
+	bits = c->count * 8;                         // 80 * 8 = 640 = 0x280
+	c->buffer[c->buflen++] = 0x80;               // buffer[16] = 0x80, buflen = 17
+	while (c->buflen != 56)                      // нули в buffer[17…55]
+	{
+		if (c->buflen == 64)                     // не срабатывает
+		{
+			md5_transform(c, c->buffer);
+			c->buflen = 0;
+		}
+		if (c->buflen != 56)
+			c->buffer[c->buflen++] = 0x00;
+	}
+	i = 0;
+	while (i < 8)
+	{
+		c->buffer[56 + i] = (uint8_t)(bits >> (i * 8));   // i = 0: 0x280 & 0xff = 0x80
+		i++;                                              // i = 1: 0x280 >> 8 = 0x02, дальше нули
+	}
+	md5_transform(c, c->buffer);                 // блок 1, стартует с state после блока 0
+```
 
 | смещение | байты |
 |---|---|
@@ -495,7 +1038,31 @@ $ ./ft_ssl md5 -q -s "1234567890…1234567890"
 
 Как цикл в `md5_final` обрабатывает хвост 56: после `0x80` `buflen = 57`. Условие `!= 56` истинно, нули дописываются до 64. На `buflen == 64` блок сжимается и `buflen = 0`. Нули снова пишутся до 56, туда встаёт длина, второй вызов `md5_transform` закрывает сообщение.
 
+`srcs/md5/md5.c`, строки 147–157, для хвоста 56 байт:
+
+```c
+	c->buffer[c->buflen++] = 0x80;               // buffer[56] = 0x80, buflen = 57
+	while (c->buflen != 56)                      // 57 != 56 — входим
+	{
+		if (c->buflen == 64)                     // станет истинно после записи buffer[63]
+		{
+			md5_transform(c, c->buffer);         // блок: 56 байт хвоста, 80, 7 нулей
+			c->buflen = 0;                       // начинаем новый блок
+		}
+		if (c->buflen != 56)
+			c->buffer[c->buflen++] = 0x00;       // сначала buffer[57…63], потом buffer[0…55]
+	}                                            // выход при buflen = 56, дальше пишется длина
+```
+
 Пустое сообщение: `hash_data` не вызывает `md5_update` при `len == 0`, `count` остаётся 0. Хеш `d41d8cd98f00b204e9800998ecf8427e`.
+
+`srcs/io.c`, строки 88–90:
+
+```c
+	if (len > 0 && data)                 // len = 0 → update пропускается
+		h->update(ctx, data, len);
+	h->final(digest, ctx);               // buflen = 0: buffer[0] = 0x80, нули, длина 0
+```
 
 ## 11. Как проверить самому
 
