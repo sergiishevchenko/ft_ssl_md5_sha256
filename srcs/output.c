@@ -25,6 +25,18 @@ static void	print_io_error(t_ssl *ssl, const char *name)
 	ssl->error = 1;
 }
 
+static void	print_label(const char *label, int is_file)
+{
+	if (is_file)
+	{
+		ft_putstr_fd(label, 1);
+		return ;
+	}
+	ft_putstr_fd("\"", 1);
+	ft_putstr_fd(label, 1);
+	ft_putstr_fd("\"", 1);
+}
+
 void	print_hash_result(t_ssl *ssl, const char *label,
 		const char *hex, int is_file)
 {
@@ -37,27 +49,13 @@ void	print_hash_result(t_ssl *ssl, const char *label,
 	{
 		ft_putstr_fd(hex, 1);
 		ft_putstr_fd(" ", 1);
-		if (!is_file)
-		{
-			ft_putstr_fd("\"", 1);
-			ft_putstr_fd(label, 1);
-			ft_putstr_fd("\"", 1);
-		}
-		else
-			ft_putstr_fd(label, 1);
+		print_label(label, is_file);
 		ft_putstr_fd("\n", 1);
 		return ;
 	}
 	ft_putstr_fd(ssl->hash->name_upper, 1);
 	ft_putstr_fd(" (", 1);
-	if (!is_file)
-	{
-		ft_putstr_fd("\"", 1);
-		ft_putstr_fd(label, 1);
-		ft_putstr_fd("\"", 1);
-	}
-	else
-		ft_putstr_fd(label, 1);
+	print_label(label, is_file);
 	ft_putstr_fd(") = ", 1);
 	ft_putendl_fd(hex, 1);
 }
