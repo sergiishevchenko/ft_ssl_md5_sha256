@@ -77,29 +77,3 @@ char	*ft_strdup(const char *s)
 	ft_memcpy(dup, s, len + 1);
 	return (dup);
 }
-
-char	*ft_strjoin_free(char *s1, char *s2, int free_s1)
-{
-	size_t	l1;
-	size_t	l2;
-	char	*res;
-
-	if (!s1)
-		l1 = 0;
-	else
-		l1 = ft_strlen(s1);
-	l2 = ft_strlen(s2);
-	res = malloc(l1 + l2 + 1);
-	if (!res)
-	{
-		if (free_s1)
-			free(s1);
-		return (NULL);
-	}
-	if (s1)
-		ft_memcpy(res, s1, l1);
-	ft_memcpy(res + l1, s2, l2 + 1);
-	if (free_s1)
-		free(s1);
-	return (res);
-}

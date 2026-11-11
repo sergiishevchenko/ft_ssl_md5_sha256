@@ -53,7 +53,6 @@ void			*ft_memcpy(void *dst, const void *src, size_t n);
 void			*ft_memset(void *b, int c, size_t len);
 void			ft_putnbr_hex(uint8_t byte, int fd);
 char			*ft_strdup(const char *s);
-char			*ft_strjoin_free(char *s1, char *s2, int free_s1);
 
 uint8_t			*read_fd(int fd, size_t *out_len);
 void			digest_to_hex(uint8_t *digest, int size, char *out);
