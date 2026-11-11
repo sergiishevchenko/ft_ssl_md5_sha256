@@ -18,16 +18,6 @@ t_hash_func	*get_hash_functions(void)
 	return (g_hashes);
 }
 
-int	get_hash_count(void)
-{
-	int	i;
-
-	i = 0;
-	while (g_hashes[i].name_upper)
-		i++;
-	return (i);
-}
-
 t_hash_func	*find_hash(const char *name)
 {
 	int	i;

@@ -38,7 +38,6 @@ typedef struct s_ssl
 }	t_ssl;
 
 t_hash_func		*get_hash_functions(void);
-int				get_hash_count(void);
 t_hash_func		*find_hash(const char *name);
 void			print_usage(void);
 void			print_invalid_command(const char *cmd);
