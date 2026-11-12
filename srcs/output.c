@@ -107,7 +107,7 @@ void	process_stdin(t_ssl *ssl)
 	char	hex[129];
 
 	data = read_fd(0, &len);
-	if (len == (size_t)-1)
+	if (len == READ_ERROR)
 	{
 		print_io_error(ssl, "stdin");
 		return ;
@@ -155,7 +155,7 @@ void	process_file(t_ssl *ssl, const char *filename)
 		return ;
 	}
 	data = read_fd(fd, &len);
-	if (len == (size_t)-1)
+	if (len == READ_ERROR)
 	{
 		print_io_error(ssl, filename);
 		close(fd);

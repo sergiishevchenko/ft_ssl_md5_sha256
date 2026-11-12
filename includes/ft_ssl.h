@@ -8,6 +8,7 @@
 # include <stdlib.h>
 
 # define BUF_SIZE 4096
+# define READ_ERROR SIZE_MAX /* 18446744073709551615 on 64-bit */
 
 typedef struct s_hash_func
 {

@@ -15,10 +15,10 @@ uint8_t	*read_fd(int fd, size_t *out_len)
 	n = read(fd, buf, BUF_SIZE);
 	while (n > 0)
 	{
-		if ((size_t)n > (size_t)-1 - total)
+		if ((size_t)n > SIZE_MAX - total)
 		{
 			free(data);
-			*out_len = (size_t)-1;
+			*out_len = READ_ERROR;
 			return (NULL);
 		}
 		if (total + (size_t)n > cap)
@@ -27,10 +27,10 @@ uint8_t	*read_fd(int fd, size_t *out_len)
 				cap = BUF_SIZE;
 			while (total + (size_t)n > cap)
 			{
-				if (cap > ((size_t)-1) / 2)
+				if (cap > SIZE_MAX / 2)
 				{
 					free(data);
-					*out_len = (size_t)-1;
+					*out_len = READ_ERROR;
 					return (NULL);
 				}
 				cap *= 2;
@@ -39,7 +39,7 @@ uint8_t	*read_fd(int fd, size_t *out_len)
 			if (!tmp)
 			{
 				free(data);
-				*out_len = (size_t)-1;
+				*out_len = READ_ERROR;
 				return (NULL);
 			}
 			if (data)
@@ -54,7 +54,7 @@ uint8_t	*read_fd(int fd, size_t *out_len)
 	if (n < 0)
 	{
 		free(data);
-		*out_len = (size_t)-1;
+		*out_len = READ_ERROR;
 		return (NULL);
 	}
 	*out_len = total;
