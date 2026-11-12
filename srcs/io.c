@@ -69,8 +69,8 @@ void	digest_to_hex(uint8_t *digest, int size, char *out)
 	i = 0;
 	while (i < size)
 	{
-		out[i * 2] = hex[(digest[i] >> 4) & 0x0f];
-		out[i * 2 + 1] = hex[digest[i] & 0x0f];
+		out[i * 2] = hex[(digest[i] >> 4) & 0x0f]; /* 172 = 1010 1100 >> 4 = 0000 1010 = 10 -> 'a' */
+		out[i * 2 + 1] = hex[digest[i] & 0x0f]; /* 172 = 1010 1100 & 0000 1111 = 0000 1100 = 12 -> 'c' */
 		i++;
 	}
 	out[size * 2] = '\0';
