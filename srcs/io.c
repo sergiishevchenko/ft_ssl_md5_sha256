@@ -2,12 +2,12 @@
 
 uint8_t	*read_fd(int fd, size_t *out_len)
 {
-	uint8_t	buf[BUF_SIZE];
-	uint8_t	*data;
-	uint8_t	*tmp;
-	ssize_t	n;
-	size_t	total;
-	size_t	cap;
+	uint8_t	buf[BUF_SIZE]; /* chunk from one read() call, e.g. 4096 bytes */
+	uint8_t	*data;         /* heap buffer with all bytes read, e.g. 10000 bytes */
+	uint8_t	*tmp;          /* new bigger buffer during growth, e.g. 8192 -> 16384 */
+	ssize_t	n;             /* bytes returned by read(), -1 on error, e.g. 4096, 1808, 0 */
+	size_t	total;         /* bytes stored in data, e.g. 10000 */
+	size_t	cap;           /* bytes allocated for data, e.g. 16384 */
 
 	data = NULL;
 	total = 0;
