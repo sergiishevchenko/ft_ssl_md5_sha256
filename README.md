@@ -13,11 +13,13 @@ interactive command parsing from `STDIN` and `whirlpool`.
 
 ## Implemented commands
 
-| Command | Digest size | Status | Reference |
-|---|---:|---|---|
-| `md5` | 128-bit | Mandatory | RFC 1321 |
-| `sha256` | 256-bit | Mandatory | FIPS 180-4 |
-| `whirlpool` | 512-bit | Bonus | ISO/IEC 10118-3 |
+| Command | Name meaning | Bits | Bytes | Hex chars | Status | Reference |
+|---|---|---:|---:|---:|---|---|
+| `md5` | Message Digest 5 (Ron Rivest, 1991) | 128 | 16 | 32 | Mandatory | RFC 1321 |
+| `sha256` | Secure Hash Algorithm, 256-bit output (NSA, SHA-2 family) | 256 | 32 | 64 | Mandatory | FIPS 180-4 |
+| `whirlpool` | Whirlpool Galaxy M51 (Rijmen & Barreto, 2000) | 512 | 64 | 128 | Bonus | ISO/IEC 10118-3 |
+
+Digest buffers are sized for the largest algorithm: `uint8_t digest[64]` and `char hex[129]` (128 hex chars + `'\0'`).
 
 ## Supported flags
 
