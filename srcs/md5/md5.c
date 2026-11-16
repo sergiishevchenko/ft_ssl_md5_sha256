@@ -108,6 +108,7 @@ void	md5_init(void *ctx)
 	t_md5_ctx	*c;
 
 	c = (t_md5_ctx *)ctx;
+	// 01 23 45 67 89 ab cd ef | fe dc ba 98 76 54 32 10
 	c->state[0] = 0x67452301;
 	c->state[1] = 0xefcdab89;
 	c->state[2] = 0x98badcfe;
