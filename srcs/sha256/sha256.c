@@ -56,8 +56,10 @@ static void	sha256_schedule(uint32_t w[64], const uint8_t block[64])
 	}
 	while (i < 64)
 	{
+		// s0 = σ0(W[t-15]), s1 = σ1(W[t-2])
 		s0 = rr(w[i - 15], 7) ^ rr(w[i - 15], 18) ^ (w[i - 15] >> 3);
 		s1 = rr(w[i - 2], 17) ^ rr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+		// W[t] = W[t-16] + σ0(W[t-15]) + W[t-7] + σ1(W[t-2])
 		w[i] = w[i - 16] + s0 + w[i - 7] + s1;
 		i++;
 	}
