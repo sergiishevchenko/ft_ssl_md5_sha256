@@ -71,10 +71,15 @@ static uint32_t	left_rotate(uint32_t x, uint32_t n)
 static void	md5_transform(t_md5_ctx *ctx, const uint8_t block[64])
 {
 	uint32_t	m[16];
-	uint32_t	a;
-	uint32_t	f;
-	uint32_t	tmp;
+	uint32_t	aa;
+	uint32_t	bb;
+	uint32_t	cc;
+	uint32_t	dd;
 	uint32_t	i;
+	uint32_t	j;
+	uint32_t	fv;
+	uint32_t	gv;
+	uint32_t	temp;
 
 	i = 0;
 	while (i < 16)
@@ -85,36 +90,26 @@ static void	md5_transform(t_md5_ctx *ctx, const uint8_t block[64])
 			| ((uint32_t)block[i * 4 + 3] << 24);
 		i++;
 	}
-	a = ctx->state[0];
-	f = ctx->state[1];
-	tmp = ctx->state[2];
-	i = ctx->state[3];
+	aa = ctx->state[0];
+	bb = ctx->state[1];
+	cc = ctx->state[2];
+	dd = ctx->state[3];
+	j = 0;
+	while (j < 64)
 	{
-		uint32_t	aa = a;
-		uint32_t	bb = f;
-		uint32_t	cc = tmp;
-		uint32_t	dd = i;
-		uint32_t	j = 0;
-		uint32_t	fv;
-		uint32_t	gv;
-		uint32_t	temp;
-
-		while (j < 64)
-		{
-			fv = md5_f(j, bb, cc, dd);
-			gv = md5_g(j);
-			temp = dd;
-			dd = cc;
-			cc = bb;
-			bb = bb + left_rotate(aa + fv + g_t[j] + m[gv], g_s[j]);
-			aa = temp;
-			j++;
-		}
-		ctx->state[0] += aa;
-		ctx->state[1] += bb;
-		ctx->state[2] += cc;
-		ctx->state[3] += dd;
+		fv = md5_f(j, bb, cc, dd);
+		gv = md5_g(j);
+		temp = dd;
+		dd = cc;
+		cc = bb;
+		bb = bb + left_rotate(aa + fv + g_t[j] + m[gv], g_s[j]);
+		aa = temp;
+		j++;
 	}
+	ctx->state[0] += aa;
+	ctx->state[1] += bb;
+	ctx->state[2] += cc;
+	ctx->state[3] += dd;
 }
 
 /** Initialize MD5 context with IV and zero counters. */
@@ -183,6 +178,8 @@ void	md5_final(uint8_t *digest, void *ctx)
 	i = 0;
 	while (i < 4)
 	{
+		/* Split each 32-bit word into 4 bytes, low byte first (LE).
+		 * (uint8_t) keeps only bits 0..7 of the shifted value. */
 		digest[i * 4] = (uint8_t)(c->state[i]);
 		digest[i * 4 + 1] = (uint8_t)(c->state[i] >> 8);
 		digest[i * 4 + 2] = (uint8_t)(c->state[i] >> 16);
