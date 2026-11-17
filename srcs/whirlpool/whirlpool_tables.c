@@ -1,5 +1,21 @@
 #include "whirlpool.h"
 
+/**
+ * Whirlpool tables — ISO/IEC 10118-3 (Whirlpool) / NESSIE (Barreto–Rijmen).
+ *
+ * The standard does NOT list C0[256] as a big array. It defines:
+ *   γ  — S-box S[0..255]
+ *   θ  — MixRows MDS circ(1,1,4,1,8,5,2,9) over GF(2^8), poly 0x11d
+ *   RC — round constants for the W cipher key schedule (10 rounds):
+ *        RC[r]_{0,j} = S[8*r + j],  j=0..7;  other rows = 0
+ *        (NESSIE paper §3.6; same in ISO 10118-3 Whirlpool clause)
+ *
+ * g_whirlpool_c0[x]: implementation T-table = γ+θ for one byte
+ *   bytes = (S[x]*1, S[x]*1, S[x]*4, S[x]*1, S[x]*8, S[x]*5, S[x]*2, S[x]*9)
+ *   Other column lanes = rotate C0 (wp_round); not stored as C1..C7.
+ *
+ * g_whirlpool_rc[r]: row 0 of RC[r] packed as uint64_t, r = 0..9.
+ */
 const uint64_t	g_whirlpool_c0[256] = {
 	0x18186018c07830d8ULL, 0x23238c2305af4626ULL, 
 	0xc6c63fc67ef991b8ULL, 0xe8e887e8136fcdfbULL, 
