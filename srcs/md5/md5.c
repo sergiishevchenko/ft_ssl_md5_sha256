@@ -94,16 +94,18 @@ static void	md5_transform(t_md5_ctx *ctx, const uint8_t block[64])
 	bb = ctx->state[1];
 	cc = ctx->state[2];
 	dd = ctx->state[3];
-	j = 0;
+	j = 0; // step 0..63; RFC T[i] with i = j+1
 	while (j < 64)
 	{
-		fv = md5_f(j, bb, cc, dd);
-		gv = md5_g(j);
-		temp = dd;
-		dd = cc;
-		cc = bb;
+		fv = md5_f(j, bb, cc, dd); //F(b,c,d) or G/H/I
+		gv = md5_g(j); // k for X[k]
+		temp = dd; // save d before rotate
+		dd = cc; // d ← c
+		cc = bb; // c ← b
+		// RFC: a = b + ((a + F(b,c,d) + X[k] + T[i]) <<< s)
+		// aa=a, bb=b, fv=F, m[gv]=X[k], g_t[j]=T[i], g_s[j]=s
 		bb = bb + left_rotate(aa + fv + g_t[j] + m[gv], g_s[j]);
-		aa = temp;
+		aa = temp; // a ← old d  (ABCD → DABC → …)
 		j++;
 	}
 	ctx->state[0] += aa;
