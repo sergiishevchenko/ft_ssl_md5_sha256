@@ -103,6 +103,9 @@ static void	whirlpool_transform(t_whirlpool_ctx *ctx, const uint8_t block[64])
 	row = -1;
 	while (++row < 8)
 		// §3.11 Hi = W(ηi) ⊕ Hi-1 ⊕ ηi ; data = W(ηi) after 10 rounds
+		//   ctx->state     = Hi-1 → Hi
+		//   data           = W[Hi-1](ηi) after 10 rounds
+		//   message_block  = ηi
 		ctx->state[row] ^= data[row] ^ message_block[row];
 }
 
