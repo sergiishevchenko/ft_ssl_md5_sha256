@@ -6,6 +6,9 @@
 Спецификация: [whirlpool.pdf](https://www.karljapetre.com/whirlpool/whirlpool.pdf)  
 (Barreto–Rijmen, ISO/IEC 10118-3 / NESSIE).
 
+Эталон с готовыми T-tables (сверка значений):  
+[linux/crypto/wp512.c](https://github.com/torvalds/linux/blob/master/crypto/wp512.c)
+
 Связанные документы: [whirlpool.md](whirlpool.md), [whirlpool-rc.md](whirlpool-rc.md).
 
 ---

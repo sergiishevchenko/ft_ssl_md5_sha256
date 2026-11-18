@@ -7,7 +7,11 @@
 next_key[0] ^= g_whirlpool_rc[round];
 ```
 
-Спецификация: [whirlpool.pdf](https://www.karljapetre.com/whirlpool/whirlpool.pdf) §3.6.  
+Спецификация: [whirlpool.pdf](https://www.karljapetre.com/whirlpool/whirlpool.pdf) §3.6.
+
+Эталон с готовыми константами раундов (сверка значений):  
+[linux/crypto/wp512.c](https://github.com/torvalds/linux/blob/master/crypto/wp512.c)
+
 Связанные документы: [whirlpool.md](whirlpool.md), [whirlpool-c0.md](whirlpool-c0.md).
 
 ---

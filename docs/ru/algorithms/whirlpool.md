@@ -7,6 +7,8 @@
 - [whirlpool-c0.md](whirlpool-c0.md) — `g_whirlpool_c0[256]`
 - [whirlpool-rc.md](whirlpool-rc.md) — `g_whirlpool_rc[10]`
 
+Готовые эталонные таблицы для сверки: [linux/crypto/wp512.c](https://github.com/torvalds/linux/blob/master/crypto/wp512.c)
+
 Общая схема программы (разбор флагов, форматы вывода) описана в [how-it-works.md](../how-it-works.md). MD5 и SHA-256 на том же примере — в [md5.md](md5.md) и [sha256.md](sha256.md).
 
 У каждого шага есть фрагмент исходника: путь к файлу, номера строк и сам код без изменений. Комментарии `//` в фрагментах добавлены только в документе, в исходниках их нет. В комментариях — значения переменных для примера `abc`.

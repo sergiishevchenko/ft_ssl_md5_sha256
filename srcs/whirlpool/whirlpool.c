@@ -9,6 +9,7 @@ extern const uint64_t	g_whirlpool_rc[10];
 // diffuse across the row. σ[k] (XOR key) is done by the caller.
 // Impl: T-tables §7.1 (not printed as C code in the PDF).
 // Spec: https://www.karljapetre.com/whirlpool/whirlpool.pdf
+// Tables: https://github.com/torvalds/linux/blob/master/crypto/wp512.c
 static uint64_t	wp_round(const uint64_t *state, int row)
 {
 	uint64_t	result;

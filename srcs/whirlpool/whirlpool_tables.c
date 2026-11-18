@@ -3,6 +3,8 @@
 /**
  * Whirlpool tables — ISO/IEC 10118-3 / NESSIE (Barreto–Rijmen).
  * Spec: https://www.karljapetre.com/whirlpool/whirlpool.pdf
+ * Reference tables (Linux crypto):
+ *   https://github.com/torvalds/linux/blob/master/crypto/wp512.c
  *
  * PDF does NOT print C0[256]; it defines the building blocks:
  *   γ  S-box — §3.2 (detail §6.2); full table = Table 3 (end of PDF)
