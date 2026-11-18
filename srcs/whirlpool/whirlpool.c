@@ -4,6 +4,11 @@
 extern const uint64_t	g_whirlpool_c0[256];
 extern const uint64_t	g_whirlpool_rc[10];
 
+// Build one output row of θ∘π∘γ (PDF §3.2–3.4; part of ρ in §3.7).
+// Meaning: mix one row of the 8×8 state — substitute bytes, shift columns,
+// diffuse across the row. σ[k] (XOR key) is done by the caller.
+// Impl: T-tables §7.1 (not printed as C code in the PDF).
+// Spec: https://www.karljapetre.com/whirlpool/whirlpool.pdf
 static uint64_t	wp_round(const uint64_t *state, int row)
 {
 	uint64_t	result;
@@ -15,16 +20,21 @@ static uint64_t	wp_round(const uint64_t *state, int row)
 	t = 0;
 	while (t < 8)
 	{
+		// §3.3 π — pick byte that lands in this row after column shift
 		idx = (uint8_t)(state[(row - t + 8) % 8] >> (56 - t * 8));
+		// §3.2 γ + §3.4 θ — S-box then MDS; packed as §7.1 T0[x]
 		c = g_whirlpool_c0[idx];
+		// §7.1 — column t uses rotate(T0), same as table Tt
 		if (t > 0)
 			c = (c >> (t * 8)) | (c << (64 - t * 8));
-		result ^= c;
+		result ^= c; // accumulate diffused bytes into this row
 		t++;
 	}
 	return (result);
 }
 
+// §3.1 μ — map 64-byte block ↔ 8×8 byte matrix.
+// Meaning: each dst[i] is one matrix row (8 bytes, big-endian).
 static void	wp_load_block(uint64_t *dst, const uint8_t *block)
 {
 	int	i;
@@ -44,46 +54,59 @@ static void	wp_load_block(uint64_t *dst, const uint8_t *block)
 	}
 }
 
+// One compression step (§3.11): Hi = W[Hi-1](ηi) ⊕ Hi-1 ⊕ ηi
+//   ctx->state = Hi-1 (chained hash / cipher key K)
+//   block      = ηi   (message block)
+//   W          = 10-round cipher (§3.9)
+// Meaning: encrypt the block under the current hash, then fold
+// ciphertext, old hash and block together (Miyaguchi–Preneel).
 static void	whirlpool_transform(t_whirlpool_ctx *ctx, const uint8_t block[64])
 {
-	uint64_t	k[8];
-	uint64_t	s[8];
-	uint64_t	nk[8];
-	uint64_t	ns[8];
-	uint64_t	blk[8];
-	int			i;
-	int			r;
+	uint64_t	key[8]; 			// K^r — round key; starts as hash Hi-1
+	uint64_t	data[8]; 			// cipher data; starts as message⊕key, ends as W(message)
+	uint64_t	next_key[8]; 		// scratch for new key while key is still old
+	uint64_t	next_data[8]; 		// scratch for new data while data is still old
+	uint64_t	message_block[8]; 	// ηi — message block as 8 rows (fixed during rounds)
+	int			row; 				// matrix row 0..7
+	int			round; 				// round index 0..9
 
-	wp_load_block(blk, block);
-	i = -1;
-	while (++i < 8)
+	wp_load_block(message_block, block); // ηi — plaintext block as matrix
+	row = -1;
+	while (++row < 8)
 	{
-		k[i] = ctx->state[i];
-		s[i] = blk[i] ^ k[i];
+		// §3.8 K^0 = K, and §3.11 sets K = Hi-1
+		key[row] = ctx->state[row];
+		// §3.9 first map of W: σ[K^0](ηi) = ηi ⊕ K^0
+		data[row] = message_block[row] ^ key[row];
 	}
-	r = 0;
-	while (r < 10)
+	round = 0;
+	while (round < 10) // §3.9 R = 10 rounds of ρ[K^r]
 	{
-		i = -1;
-		while (++i < 8)
-			nk[i] = wp_round(k, i);
-		nk[0] ^= g_whirlpool_rc[r];
-		i = -1;
-		while (++i < 8)
-			k[i] = nk[i];
-		i = -1;
-		while (++i < 8)
-			ns[i] = wp_round(s, i) ^ k[i];
-		i = -1;
-		while (++i < 8)
-			s[i] = ns[i];
-		r++;
+		row = -1;
+		while (++row < 8)
+			// §3.8: K^r = ρ[c^r](K^{r-1}); here θ∘π∘γ before ⊕ c^r
+			next_key[row] = wp_round(key, row);
+		// §3.6 c^r only in row 0; §3.5 σ[c^r] finishes key round
+		next_key[0] ^= g_whirlpool_rc[round];
+		row = -1;
+		while (++row < 8)
+			key[row] = next_key[row];
+		row = -1;
+		while (++row < 8)
+			// §3.7 ρ[K^r] = σ[K^r] ∘ θ ∘ π ∘ γ on data state
+			next_data[row] = wp_round(data, row) ^ key[row];
+		row = -1;
+		while (++row < 8)
+			data[row] = next_data[row];
+		round++;
 	}
-	i = -1;
-	while (++i < 8)
-		ctx->state[i] ^= s[i] ^ blk[i];
+	row = -1;
+	while (++row < 8)
+		// §3.11 Hi = W(ηi) ⊕ Hi-1 ⊕ ηi ; data = W(ηi) after 10 rounds
+		ctx->state[row] ^= data[row] ^ message_block[row];
 }
 
+// §3.11 / §3.12: H0 = IV = 512 zero bits.
 void	whirlpool_init(void *ctx)
 {
 	t_whirlpool_ctx	*c;
@@ -92,6 +115,7 @@ void	whirlpool_init(void *ctx)
 	ft_memset(c, 0, sizeof(t_whirlpool_ctx));
 }
 
+// §3.12: feed bytes; every full 512-bit ηi → compress.
 void	whirlpool_update(void *ctx, const uint8_t *data, size_t len)
 {
 	t_whirlpool_ctx	*c;
@@ -112,6 +136,10 @@ void	whirlpool_update(void *ctx, const uint8_t *data, size_t len)
 	c->count += len;
 }
 
+// §3.10 padding: 1-bit, zeros to odd multiple of 256 bits, then 256-bit L.
+// Meaning: mark end of message and append bit-length so identical
+// prefixes of different lengths cannot collide.
+// §3.12: digest = μ^{-1}(Ht) — state bytes, big-endian.
 void	whirlpool_final(uint8_t *digest, void *ctx)
 {
 	t_whirlpool_ctx	*c;
