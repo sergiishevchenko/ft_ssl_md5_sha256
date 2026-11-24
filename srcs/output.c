@@ -35,7 +35,7 @@ static void	print_label(const char *label, int is_file)
 	ft_putstr_fd("\"", 1);
 	ft_putstr_fd(label, 1);
 	ft_putstr_fd("\"", 1);
-}
+} // file → file.txt; string → "foo"
 
 void	print_hash_result(t_ssl *ssl, const char *label,
 		const char *hex, int is_file)
@@ -58,7 +58,7 @@ void	print_hash_result(t_ssl *ssl, const char *label,
 	print_label(label, is_file);
 	ft_putstr_fd(") = ", 1);
 	ft_putendl_fd(hex, 1);
-}
+} // -q → hex; -r → hex "foo"; else → MD5 ("foo") = hex
 
 static void	print_stdin_p(t_ssl *ssl, uint8_t *data,
 		size_t len, const char *hex)
