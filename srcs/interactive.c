@@ -35,7 +35,7 @@ static char	*get_next_word(char **line)
 		return (NULL);
 	ft_memcpy(word, start, len);
 	word[len] = '\0';
-	return (word);
+	return (word); // return next word from line | md5 -s "foo bar" → "md5", "-s", "foo bar", NULL
 }
 
 static char	**split_line(char *line, int *argc)
@@ -68,7 +68,7 @@ static char	**split_line(char *line, int *argc)
 		free(argv);
 		return (NULL);
 	}
-	return (argv);
+	return (argv); // "md5 -s foo" → argv = ["md5", "-s", "foo", NULL]
 }
 
 static void	free_argv(char **argv, int argc)
@@ -108,6 +108,7 @@ static char	*read_line(void)
 	size_t	cap;
 	ssize_t	n;
 
+	// cap - buffer capacity: 128 [bytes] fits typical cmds, then doubles
 	cap = 128;
 	len = 0;
 	line = malloc(cap);
