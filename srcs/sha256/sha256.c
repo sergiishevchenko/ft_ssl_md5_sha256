@@ -1,12 +1,10 @@
 #include "sha256.h"
 #include "ft_ssl.h"
 
-/**
- * Round constants K[0..63] (FIPS 180-4, §4.2.2).
- * K[i] = floor(2^32 * frac(cbrt(p_i))), p_i = first 64 primes.
- * Example: cbrt(2) ≈ 1.259921 → frac ≈ 0.259921
- * → 2^32 * frac ≈ 1116352408.85 → floor → 0x428a2f98 = g_k[0].
- */
+// Round constants K[0..63] (FIPS 180-4, §4.2.2).
+// K[i] = floor(2^32 * frac(cbrt(p_i))), p_i = first 64 primes.
+// Example: cbrt(2) ≈ 1.259921 → frac ≈ 0.259921
+// → 2^32 * frac ≈ 1116352408.85 → floor → 0x428a2f98 = g_k[0].
 static const uint32_t	g_k[64] = {
 	0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
 	0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -26,19 +24,17 @@ static const uint32_t	g_k[64] = {
 	0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
 };
 
-/** ROTR^n(x) — rotate right (FIPS 180-4 §3.2). */
+// ROTR^n(x) — rotate right (FIPS 180-4 §3.2)
 static uint32_t	rr(uint32_t x, uint32_t n)
 {
 	return ((x >> n) | (x << (32 - n)));
 }
 
-/**
- * Message schedule W[0..63] (FIPS 180-4 §6.2.2 step 1).
- * W[0..15]: 16 big-endian words from the 64-byte block.
- * W[16..63]: W[t] = σ1(W[t-2]) + W[t-7] + σ0(W[t-15]) + W[t-16]
- *   σ0(x) = ROTR7(x)  ⊕ ROTR18(x) ⊕ SHR3(x)   (FIPS §4.1.2)
- *   σ1(x) = ROTR17(x) ⊕ ROTR19(x) ⊕ SHR10(x)
- */
+// Message schedule W[0..63] (FIPS 180-4 §6.2.2 step 1).
+// W[0..15]: 16 big-endian words from the 64-byte block.
+// W[16..63]: W[t] = σ1(W[t-2]) + W[t-7] + σ0(W[t-15]) + W[t-16]
+//   σ0(x) = ROTR7(x)  ⊕ ROTR18(x) ⊕ SHR3(x)   (FIPS §4.1.2)
+//   σ1(x) = ROTR17(x) ⊕ ROTR19(x) ⊕ SHR10(x)
 static void	sha256_schedule(uint32_t w[64], const uint8_t block[64])
 {
 	uint32_t	i;
@@ -65,17 +61,15 @@ static void	sha256_schedule(uint32_t w[64], const uint8_t block[64])
 	}
 }
 
-/**
- * Compress one 64-byte block (FIPS 180-4 §6.2.2 steps 2–4).
- * v[0..7] = a,b,c,d,e,f,g,h.
- * T1 = h + Σ1(e) + Ch(e,f,g) + K[t] + W[t]   (§4.1.2)
- * T2 = Σ0(a) + Maj(a,b,c)
- *   Σ1(e) = ROTR6 ⊕ ROTR11 ⊕ ROTR25
- *   Ch(e,f,g) = (e∧f) ⊕ (¬e∧g)
- *   Σ0(a) = ROTR2 ⊕ ROTR13 ⊕ ROTR22
- *   Maj(a,b,c) = (a∧b) ⊕ (a∧c) ⊕ (b∧c)
- * Then rotate a..h; finally H[i] += working vars.
- */
+// Compress one 64-byte block (FIPS 180-4 §6.2.2 steps 2–4).
+// v[0..7] = a,b,c,d,e,f,g,h.
+// T1 = h + Σ1(e) + Ch(e,f,g) + K[t] + W[t]   (§4.1.2)
+// T2 = Σ0(a) + Maj(a,b,c)
+//   Σ1(e) = ROTR6 ⊕ ROTR11 ⊕ ROTR25
+//   Ch(e,f,g) = (e∧f) ⊕ (¬e∧g)
+//   Σ0(a) = ROTR2 ⊕ ROTR13 ⊕ ROTR22
+//   Maj(a,b,c) = (a∧b) ⊕ (a∧c) ⊕ (b∧c)
+// Then rotate a..h; finally H[i] += working vars.
 static void	sha256_transform(t_sha256_ctx *ctx, const uint8_t block[64])
 {
 	uint32_t	w[64];
@@ -116,10 +110,8 @@ static void	sha256_transform(t_sha256_ctx *ctx, const uint8_t block[64])
 	}
 }
 
-/**
- * Initial hash values H[0..7] (FIPS 180-4 §5.3.3).
- * H[i] = floor(2^32 * frac(sqrt(p_i))), p_i = first 8 primes.
- */
+// Initial hash values H[0..7] (FIPS 180-4 §5.3.3).
+// H[i] = floor(2^32 * frac(sqrt(p_i))), p_i = first 8 primes.
 void	sha256_init(void *ctx)
 {
 	t_sha256_ctx	*c;
@@ -137,7 +129,7 @@ void	sha256_init(void *ctx)
 	c->buflen = 0;
 }
 
-/** Feed data; transform every full 512-bit block (FIPS §6.2). */
+// Feed data; transform every full 512-bit block (FIPS §6.2).
 void	sha256_update(void *ctx, const uint8_t *data, size_t len)
 {
 	t_sha256_ctx	*c;
@@ -158,11 +150,9 @@ void	sha256_update(void *ctx, const uint8_t *data, size_t len)
 	c->count += len;
 }
 
-/**
- * Padding + length + final digest (FIPS 180-4 §5.1.1, §6.2.2).
- * Append 0x80, zeros to 56 bytes, then 64-bit bit-length big-endian.
- * Output H[0..7] as big-endian bytes.
- */
+// Padding + length + final digest (FIPS 180-4 §5.1.1, §6.2.2).
+// Append 0x80, zeros to 56 bytes, then 64-bit bit-length big-endian.
+// Output H[0..7] as big-endian bytes.
 void	sha256_final(uint8_t *digest, void *ctx)
 {
 	t_sha256_ctx	*c;

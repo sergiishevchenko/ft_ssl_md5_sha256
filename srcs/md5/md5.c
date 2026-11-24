@@ -1,12 +1,10 @@
 #include "md5.h"
 #include "ft_ssl.h"
 
-/**
- * Per-step additive constants: T[i] = floor(2^32 * |sin(i)|),
- * where i is in radians, i = 1..64 (g_t[0] = T[1], ..., g_t[63] = T[64]).
- * Example: sin(1) ≈ 0.8414709848 → 2^32 * sin(1) ≈ 3614092568.46
- * → floor → 3614092568 = 0xd76aa478 = g_t[0].
- */
+// Per-step additive constants: T[i] = floor(2^32 * |sin(i)|),
+// where i is in radians, i = 1..64 (g_t[0] = T[1], ..., g_t[63] = T[64]).
+// Example: sin(1) ≈ 0.8414709848 → 2^32 * sin(1) ≈ 3614092568.46
+// → floor → 3614092568 = 0xd76aa478 = g_t[0].
 static const uint32_t	g_t[64] = {
 	0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee,
 	0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
@@ -26,7 +24,7 @@ static const uint32_t	g_t[64] = {
 	0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391
 };
 
-/** Left-rotate amounts for each of the 64 steps. */
+// Left-rotate amounts for each of the 64 steps.
 static const uint32_t	g_s[64] = {
 	7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
 	5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
@@ -34,7 +32,7 @@ static const uint32_t	g_s[64] = {
 	6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21
 };
 
-/** Round nonlinear function: F (0-15), G (16-31), H (32-47), I (48-63). */
+//Round nonlinear function: F (0-15), G (16-31), H (32-47), I (48-63).
 static uint32_t	md5_f(uint32_t i, uint32_t b, uint32_t c, uint32_t d)
 {
 	if (i < 16) // if b then c else d
@@ -46,10 +44,8 @@ static uint32_t	md5_f(uint32_t i, uint32_t b, uint32_t c, uint32_t d)
 	return (c ^ (b | ~d)); // c XOR (b OR NOT d)
 }
 
-/**
- * Message word index k for step i (RFC 1321 [ABCD k s i]).
- * Returns which of M[0..15] / X[k] to use; formulas encode the RFC k-lists.
- */
+// Message word index k for step i (RFC 1321 [ABCD k s i]).
+//Returns which of M[0..15] / X[k] to use; formulas encode the RFC k-lists.
 static uint32_t	md5_g(uint32_t i)
 {
 	if (i < 16)
@@ -61,13 +57,13 @@ static uint32_t	md5_g(uint32_t i)
 	return ((7 * i) % 16);
 }
 
-/** Rotate x left by n bits (circular shift). */
+// Rotate x left by n bits (circular shift).
 static uint32_t	left_rotate(uint32_t x, uint32_t n)
 {
 	return ((x << n) | (x >> (32 - n)));
 }
 
-/** Process one 64-byte block: 64 steps updating A,B,C,D state. */
+// Process one 64-byte block: 64 steps updating A,B,C,D state.
 static void	md5_transform(t_md5_ctx *ctx, const uint8_t block[64])
 {
 	uint32_t	m[16];
@@ -114,7 +110,7 @@ static void	md5_transform(t_md5_ctx *ctx, const uint8_t block[64])
 	ctx->state[3] += dd;
 }
 
-/** Initialize MD5 context with IV and zero counters. */
+//Initialize MD5 context with IV and zero counters.
 void	md5_init(void *ctx)
 {
 	t_md5_ctx	*c;
@@ -129,7 +125,7 @@ void	md5_init(void *ctx)
 	c->buflen = 0;
 }
 
-/** Feed data into the hash; transform every full 64-byte block. */
+// Feed data into the hash; transform every full 64-byte block.
 void	md5_update(void *ctx, const uint8_t *data, size_t len)
 {
 	t_md5_ctx	*c;
@@ -150,7 +146,7 @@ void	md5_update(void *ctx, const uint8_t *data, size_t len)
 	c->count += len;
 }
 
-/** Pad, append bit-length, final transform, write 16-byte digest. */
+//Pad, append bit-length, final transform, write 16-byte digest.
 void	md5_final(uint8_t *digest, void *ctx)
 {
 	t_md5_ctx	*c;
@@ -180,8 +176,8 @@ void	md5_final(uint8_t *digest, void *ctx)
 	i = 0;
 	while (i < 4)
 	{
-		/* Split each 32-bit word into 4 bytes, low byte first (LE).
-		 * (uint8_t) keeps only bits 0..7 of the shifted value. */
+		// Split each 32-bit word into 4 bytes, low byte first (LE).
+		// uint8_t) keeps only bits 0..7 of the shifted value.
 		digest[i * 4] = (uint8_t)(c->state[i]);
 		digest[i * 4 + 1] = (uint8_t)(c->state[i] >> 8);
 		digest[i * 4 + 2] = (uint8_t)(c->state[i] >> 16);
