@@ -27,7 +27,7 @@ static int	parse_flags(t_ssl *ssl, int *i,
 			(*i)++;
 			if (*str_count < MAX_STRINGS)
 			{
-				strings[*str_count] = ssl->argv[*i];
+				strings[*str_count] = ssl->argv[*i]; // md5 -p -s "a" -s "b" file -> strings = ["a", "b", NULL]
 				(*str_count)++;
 			}
 		}
@@ -51,7 +51,7 @@ int	execute_command(t_ssl *ssl)
 	ssl->flags.q = 0;
 	ssl->flags.r = 0;
 	ssl->error = 0;
-	had_target = 0;
+	had_target = 0; // flag to check if we have a target (string or file)
 	if (parse_flags(ssl, &i, strings, &str_count))
 		return (1);
 	if (ssl->flags.p)
@@ -59,7 +59,7 @@ int	execute_command(t_ssl *ssl)
 	j = 0;
 	while (j < str_count)
 	{
-		had_target = 1;
+		had_target = 1; 
 		process_string(ssl, strings[j]);
 		j++;
 	}
@@ -69,7 +69,7 @@ int	execute_command(t_ssl *ssl)
 		process_file(ssl, ssl->argv[i]);
 		i++;
 	}
-	if (!had_target && !ssl->flags.p)
+	if (!had_target && !ssl->flags.p) // if no target and no -p, process stdin
 		process_stdin(ssl);
 	if (ssl->error)
 		return (1);
