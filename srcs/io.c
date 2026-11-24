@@ -12,20 +12,20 @@ uint8_t	*read_fd(int fd, size_t *out_len)
 	data = NULL;
 	total = 0;
 	cap = 0;
-	n = read(fd, buf, BUF_SIZE);
+	n = read(fd, buf, BUF_SIZE); // read up to 4096 bytes from fd into buf
 	while (n > 0)
 	{
-		if ((size_t)n > SIZE_MAX - total)
+		if ((size_t)n > SIZE_MAX - total) // check if adding n would overflow size_t
 		{
 			free(data);
 			*out_len = READ_ERROR;
 			return (NULL);
 		}
-		if (total + (size_t)n > cap)
+		if (total + (size_t)n > cap) // check if adding n would overflow cap
 		{
 			if (cap == 0)
 				cap = BUF_SIZE;
-			while (total + (size_t)n > cap)
+			while (total + (size_t)n > cap) // double cap until it's big enough
 			{
 				if (cap > SIZE_MAX / 2)
 				{
@@ -33,7 +33,7 @@ uint8_t	*read_fd(int fd, size_t *out_len)
 					*out_len = READ_ERROR;
 					return (NULL);
 				}
-				cap *= 2;
+				cap *= 2; // double cap
 			}
 			tmp = malloc(cap);
 			if (!tmp)
@@ -47,7 +47,7 @@ uint8_t	*read_fd(int fd, size_t *out_len)
 			free(data);
 			data = tmp;
 		}
-		ft_memcpy(data + total, buf, n);
+		ft_memcpy(data + total, buf, n); // copy n bytes from buf to data + total
 		total += n;
 		n = read(fd, buf, BUF_SIZE);
 	}
@@ -57,7 +57,7 @@ uint8_t	*read_fd(int fd, size_t *out_len)
 		*out_len = READ_ERROR;
 		return (NULL);
 	}
-	*out_len = total;
+	*out_len = total; // set out_len to total bytes read
 	return (data);
 }
 
